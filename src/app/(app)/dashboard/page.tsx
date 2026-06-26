@@ -16,7 +16,7 @@ const ABAS_VALIDAS = [
   "cadastro",
   "estoque",
   "compras",
-  "financeiro",
+  "balancete",
   "usuarios",
 ] as const;
 
@@ -60,13 +60,13 @@ export default async function DashboardPage({
   const isAdmin = vinculo?.papel === "admin" || vinculo?.papel === "socio";
 
   return (
-    <main className="min-h-screen bg-[#f0f7ff] px-6 py-8 text-[#0d1b2a]">
+    <main className="min-h-screen bg-[#1e1e1e] px-6 py-8 text-[#ECEFF1]">
       <section className="mx-auto max-w-7xl">
         <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
           <div className="flex flex-col gap-2">
             <Link
               href="/app"
-              className="mb-2 inline-flex items-center gap-2 text-sm font-semibold text-[#1565c0] transition hover:text-[#0d47a1]"
+              className="mb-2 inline-flex items-center gap-2 text-sm font-semibold text-[#90A4AE] transition hover:text-[#ECEFF1]"
             >
               <ArrowLeft className="h-4 w-4" />
               Voltar ao início
@@ -81,7 +81,7 @@ export default async function DashboardPage({
                 unoptimized
                 className="h-11 w-auto object-contain"
               />
-              <div className="h-8 w-px bg-[#90caf9]" />
+              <div className="h-8 w-px bg-[#90A4AE]" />
               <Image
                 src="/images/dashboard.png"
                 alt="Dashboard"
@@ -94,19 +94,19 @@ export default async function DashboardPage({
             <h1 className="text-3xl font-bold tracking-tight md:text-4xl">
               Olá, {nomeUsuario}
             </h1>
-            <p className="max-w-2xl text-sm leading-6 text-[#455a80] md:text-base">
+            <p className="max-w-2xl text-sm leading-6 text-[#78909C] md:text-base">
               Centralize vendas, produtos, estoque, compras e indicadores
               financeiros em um só lugar.
             </p>
           </div>
 
-          <div className="flex shrink-0 items-center gap-3 rounded-3xl border border-[#90caf9] bg-white/85 p-3 shadow-sm">
+          <div className="flex shrink-0 items-center gap-3 rounded-3xl border border-white/10 bg-white/5 backdrop-blur-sm p-3 shadow-sm">
             <div className="flex flex-col md:items-end">
-              <span className="max-w-[220px] truncate text-sm font-semibold text-[#1565c0]">
+              <span className="max-w-[220px] truncate text-sm font-semibold text-[#90A4AE]">
                 {nomeUsuario}
               </span>
               {user.email ? (
-                <span className="max-w-[220px] truncate text-xs text-[#455a80]">
+                <span className="max-w-[220px] truncate text-xs text-[#78909C]">
                   {user.email}
                 </span>
               ) : null}

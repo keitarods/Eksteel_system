@@ -111,17 +111,27 @@ function formatarErroRecuperacao(error: Error) {
   return error.message;
 }
 
-function formatarErroCadastro(error: Error) {
-  const mensagem = error.message.toLowerCase();
+function formatarErroCadastro(error: Error & { status?: number; code?: string }) {
+  const mensagem = (error.message ?? "").toLowerCase();
+
+  if (mensagem.includes("user already registered") || mensagem.includes("already registered")) {
+    return "Este e-mail já possui uma conta. Faça login ou recupere sua senha.";
+  }
 
   if (
-    mensagem.includes("confirmation email") ||
-    mensagem.includes("confirmation mail") ||
-    mensagem.includes("email rate limit") ||
-    mensagem.includes("rate limit") ||
-    mensagem.includes("smtp")
+    mensagem.includes("password") &&
+    (mensagem.includes("weak") || mensagem.includes("short") || mensagem.includes("length"))
   ) {
-    return "Não foi possível enviar o e-mail de confirmação agora. Aguarde alguns minutos ou configure um SMTP próprio no painel do Supabase.";
+    return "A senha não atende aos requisitos mínimos do servidor.";
+  }
+
+  if (mensagem.includes("unable to validate") || mensagem.includes("invalid")) {
+    return `Credenciais inválidas. Verifique o e-mail e a senha. (${error.message})`;
+  }
+
+  if (!error.message || error.message === "{}") {
+    const extra = [error.code, error.status].filter(Boolean).join(" / ");
+    return `Erro ao criar conta${extra ? ` (${extra})` : ""}. Verifique o console do Supabase para mais detalhes.`;
   }
 
   return error.message;
@@ -333,33 +343,52 @@ export default function LoginPage() {
 
     setCarregando(true);
 
-    const supabase = createClient();
-    const { data, error } = await supabase.auth.signUp({
-      email: normalizarEmail(emailCadastro),
-      password: senhaCadastro,
-      options: {
-        data: { nome_completo: nomeCadastro.trim() },
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
+    try {
+      const supabase = createClient();
+      const { data, error } = await supabase.auth.signUp({
+        email: normalizarEmail(emailCadastro),
+        password: senhaCadastro,
+        options: {
+          data: { nome_completo: nomeCadastro.trim() },
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+        },
+      });
 
-    setCarregando(false);
+      setCarregando(false);
 
-    if (error) {
-      setErro(formatarErroCadastro(error));
-      return;
-    }
+      if (error) {
+        setErro(formatarErroCadastro(error));
+        return;
+      }
 
-    if (data.user && !data.session) {
-      setMensagem(
-        "Cadastro realizado. Verifique seu e-mail para confirmar a conta."
+      const user = data?.user ?? null;
+      const session = data?.session ?? null;
+
+      if (user && !session) {
+        setMensagem(
+          "Cadastro realizado. Verifique seu e-mail para confirmar a conta."
+        );
+        setAbaAtiva("login");
+        return;
+      }
+
+      if (!user) {
+        setErro(
+          "Não foi possível criar a conta ou enviar o e-mail de confirmação. Verifique as configurações de SMTP no painel do Supabase (Authentication → Settings)."
+        );
+        return;
+      }
+
+      router.push("/app");
+      router.refresh();
+    } catch (err) {
+      setCarregando(false);
+      setErro(
+        err instanceof Error
+          ? err.message
+          : "Erro inesperado ao criar conta. Tente novamente."
       );
-      setAbaAtiva("login");
-      return;
     }
-
-    router.push("/app");
-    router.refresh();
   }
 
   async function handleRecuperacao(e: React.FormEvent) {
