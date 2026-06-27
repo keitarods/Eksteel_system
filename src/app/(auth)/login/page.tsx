@@ -438,10 +438,10 @@ export default function LoginPage() {
         <div className="absolute inset-0 bg-gradient-to-r from-[#1e1e1e]/95 via-[#1e1e1e]/85 to-[#1e1e1e]/20" />
       </div>
 
-      <section className="relative z-10 mx-auto flex min-h-screen max-w-6xl items-center px-6 py-12">
-        <div className="grid w-full gap-10 lg:grid-cols-[1fr_auto]">
+      <section className="relative z-10 mx-auto flex min-h-screen max-w-6xl items-center px-4 py-8 sm:px-6 sm:py-12">
+        <div className="grid w-full gap-8 lg:grid-cols-[1fr_auto]">
           <div className="flex w-full flex-col justify-center">
-            <div className="mb-6 flex w-full items-center">
+            <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center">
               <Image
                 src="/images/Eksteel-logo.png"
                 alt="Eksteel"
@@ -449,19 +449,19 @@ export default function LoginPage() {
                 height={108}
                 priority
                 unoptimized
-                className="h-28 w-auto shrink-0 object-contain"
+                className="h-20 sm:h-28 w-auto shrink-0 object-contain"
                 onError={() => {}}
               />
-              <div className="mx-6 h-20 w-px shrink-0 bg-gray-600" />
+              <div className="hidden sm:block mx-6 h-20 w-px shrink-0 bg-gray-600" />
               <span
-                className="flex-1 whitespace-nowrap text-center text-lg uppercase leading-tight tracking-wider bg-gradient-to-r from-[#9e9e9e] to-[#f0f0f0] bg-clip-text text-transparent"
+                className="text-base sm:text-lg uppercase leading-tight tracking-wider bg-gradient-to-r from-[#9e9e9e] to-[#f0f0f0] bg-clip-text text-transparent"
                 style={{ fontFamily: "var(--font-oswald)", fontWeight: 700 }}
               >
                 Sistema de Gerenciamento Empresarial
               </span>
             </div>
 
-            <h1 className="text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl">
+            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl md:text-5xl">
               Controle vendas, estoque e lucro da sua empresa.
             </h1>
 
@@ -470,7 +470,7 @@ export default function LoginPage() {
               gerenciar estoque e analisar indicadores financeiros em tempo real.
             </p>
 
-            <div className="mt-8 grid gap-3 sm:grid-cols-3">
+            <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
               {[
                 ["Marketplaces", "Mercado Livre, Shopee e outros canais."],
                 ["Estoque", "Inventário e alertas de reposição."],

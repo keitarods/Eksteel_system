@@ -283,8 +283,8 @@ export default function DashboardTabs({
     : TODAS_ABAS.filter((a) => a.id !== "usuarios");
 
   return (
-    <div className="mt-8">
-      <div className="flex gap-2 overflow-x-auto rounded-3xl border border-[#333333] bg-[#141414]/95 p-2 shadow-sm">
+    <div className="mt-5 sm:mt-8">
+      <div className="flex gap-1.5 overflow-x-auto rounded-3xl border border-[#333333] bg-[#141414]/95 p-2 shadow-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {abas.map((aba) => {
           const Icon = aba.icon;
           const ativa = abaAtiva === aba.id;
@@ -294,14 +294,14 @@ export default function DashboardTabs({
               key={aba.id}
               type="button"
               onClick={() => setAbaAtiva(aba.id)}
-              className={`flex h-11 shrink-0 items-center gap-2 rounded-2xl px-4 text-sm font-semibold transition ${
+              className={`flex h-10 shrink-0 items-center gap-2 rounded-2xl px-3 sm:px-4 text-sm font-semibold transition ${
                 ativa
                   ? "bg-[#546E7A] text-white shadow-sm"
-                  : "text-[#546E7A] hover:bg-[#2a2a2a]"
+                  : "text-[#90A4AE] hover:bg-[#2a2a2a]"
               }`}
             >
-              <Icon className="h-4 w-4" />
-              {aba.label}
+              <Icon className="h-4 w-4 shrink-0" />
+              <span className="hidden sm:inline">{aba.label}</span>
             </button>
           );
         })}
@@ -354,11 +354,11 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
     async function carregar() {
       const supabase = createClient();
       const [{ data: v }, { data: d }, { data: p }, { data: pf }, { data: bl }] = await Promise.all([
-        supabase.from("vendas").select("*").eq("criado_por", usuarioId).order("data", { ascending: false }).limit(500),
-        supabase.from("despesas").select("*").eq("criado_por", usuarioId).order("data", { ascending: false }),
-        supabase.from("produtos").select("*").eq("criado_por", usuarioId).eq("ativo", true),
-        supabase.from("pedidos_fabricacao").select("*").eq("criado_por", usuarioId).order("data", { ascending: false }).limit(500),
-        supabase.from("balancete").select("*").eq("criado_por", usuarioId).order("data", { ascending: false }),
+        supabase.from("vendas").select("*").order("data", { ascending: false }).limit(500),
+        supabase.from("despesas").select("*").order("data", { ascending: false }),
+        supabase.from("produtos").select("*").eq("ativo", true),
+        supabase.from("pedidos_fabricacao").select("*").order("data", { ascending: false }).limit(500),
+        supabase.from("balancete").select("*").order("data", { ascending: false }),
       ]);
       if (ativo) {
         setVendas((v ?? []).map(mapVenda));
@@ -395,7 +395,7 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
   async function handleExcluirDespesa(id: string) {
     if (!confirm("Excluir esta despesa?")) return;
     const supabase = createClient();
-    const { error } = await supabase.from("despesas").delete().eq("id", id).eq("criado_por", usuarioId);
+    const { error } = await supabase.from("despesas").delete().eq("id", id);
     if (error) { setErro(error.message); return; }
     setDespesas((prev) => prev.filter((d) => d.id !== id));
     setMensagem("Despesa removida.");
@@ -503,14 +503,14 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
 
       {/* ── Indicadores de Receita ── */}
       <DashSecao titulo="Indicadores de Receita" />
-      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-6 shadow-sm">
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
           <KpiCard titulo="Receita bruta" valor={formatarMoeda(receitaBruta)} />
           <KpiCard titulo="Lucro bruto" valor={formatarMoeda(lucroBruto)} destaque />
           <KpiCard titulo="Lucro líquido" valor={formatarMoeda(lucroLiquido)} destaque={lucroLiquido >= 0} alerta={lucroLiquido < 0} />
           <KpiCard titulo="Margem líquida" valor={`${margem.toFixed(1)}%`} destaque={margem >= 0} alerta={margem < 0} />
         </div>
-        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
           <KpiCard titulo="Taxas marketplace" valor={formatarMoeda(taxasMarketplace)} alerta />
           <KpiCard titulo="Custo fab. vendidos" valor={formatarMoeda(custoFabricacaoVendidos)} alerta />
           <KpiCard titulo="Outras despesas" valor={formatarMoeda(totalDespesas)} alerta />
@@ -519,8 +519,8 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
 
       {/* ── Indicadores de Estoque ── */}
       <DashSecao titulo="Indicadores de Estoque" />
-      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-6 shadow-sm">
-        <div className="grid gap-4 sm:grid-cols-3">
+      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <KpiCard titulo="Capital em estoque" valor={formatarMoeda(capitalTotalEstoque)} destaque />
           <KpiCard titulo="Unidades em estoque" valor={String(totalUnidadesEstoque)} />
           <KpiCard titulo="Produtos abaixo do mínimo" valor={String(produtosAbaixoMinimo.length)} alerta={produtosAbaixoMinimo.length > 0} />
@@ -544,8 +544,8 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
       {/* ── Evolução Financeira ── */}
       <DashSecao titulo="Evolução Financeira" />
       <div className="grid gap-6 lg:grid-cols-3">
-        <div className="rounded-3xl border border-[#333333] bg-[#212121] p-6 shadow-sm">
-          <p className="text-sm font-semibold text-[#546E7A]">Últimos 6 meses</p>
+        <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
+          <p className="text-sm font-semibold text-[#90A4AE]">Últimos 6 meses</p>
           <h3 className="mt-1 text-lg font-bold">Receita — Tempo</h3>
           <div className="mt-4 h-56">
             <ResponsiveContainer width="100%" height="100%">
@@ -559,8 +559,8 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
             </ResponsiveContainer>
           </div>
         </div>
-        <div className="rounded-3xl border border-[#333333] bg-[#212121] p-6 shadow-sm">
-          <p className="text-sm font-semibold text-[#546E7A]">Canais de venda</p>
+        <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
+          <p className="text-sm font-semibold text-[#90A4AE]">Canais de venda</p>
           <h3 className="mt-1 text-lg font-bold">Receita por marketplace</h3>
           {vendasPorMarketplace.length > 0 ? (
             <div className="mt-4 h-56">
@@ -578,8 +578,8 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
             <div className="mt-4 py-12 text-center text-sm text-[#78909C]">Nenhuma venda registrada ainda.</div>
           )}
         </div>
-        <div className="rounded-3xl border border-[#333333] bg-[#212121] p-6 shadow-sm">
-          <p className="text-sm font-semibold text-[#546E7A]">Produtos</p>
+        <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
+          <p className="text-sm font-semibold text-[#90A4AE]">Produtos</p>
           <h3 className="mt-1 text-lg font-bold">Receita por produto</h3>
           {receitaPorProduto.length > 0 ? (
             <div className="mt-4 h-56">
@@ -602,8 +602,8 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
       {/* ── Análise de Despesas ── */}
       <DashSecao titulo="Análise de Despesas" />
       <div className="grid gap-6 lg:grid-cols-3">
-        <div className="rounded-3xl border border-[#333333] bg-[#212121] p-6 shadow-sm">
-          <p className="text-sm font-semibold text-[#546E7A]">Fluxo mensal</p>
+        <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
+          <p className="text-sm font-semibold text-[#90A4AE]">Fluxo mensal</p>
           <h3 className="mt-1 text-lg font-bold">Receita vs Despesas</h3>
           <div className="mt-4 h-52">
             <ResponsiveContainer width="100%" height="100%">
@@ -619,8 +619,8 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
             </ResponsiveContainer>
           </div>
         </div>
-        <div className="rounded-3xl border border-[#333333] bg-[#212121] p-6 shadow-sm">
-          <p className="text-sm font-semibold text-[#546E7A]">Despesas</p>
+        <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
+          <p className="text-sm font-semibold text-[#90A4AE]">Despesas</p>
           <h3 className="mt-1 text-lg font-bold">Por categoria</h3>
           {despesasPorCategoria.length > 0 ? (
             <div className="mt-4 h-52">
@@ -638,8 +638,8 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
             <div className="mt-4 py-10 text-center text-sm text-[#78909C]">Nenhuma despesa registrada.</div>
           )}
         </div>
-        <div className="rounded-3xl border border-[#333333] bg-[#212121] p-6 shadow-sm">
-          <p className="text-sm font-semibold text-[#546E7A]">Custo de fabricação</p>
+        <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
+          <p className="text-sm font-semibold text-[#90A4AE]">Custo de fabricação</p>
           <h3 className="mt-1 text-lg font-bold">Por produto vendido</h3>
           {custoPorProduto.length > 0 ? (
             <div className="mt-4 h-52">
@@ -661,8 +661,8 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
 
       {/* ── Indicadores de Balancete ── */}
       <DashSecao titulo="Indicadores de Balancete" />
-      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-6 shadow-sm">
-        <div className="grid gap-4 sm:grid-cols-3">
+      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <KpiCard titulo="Total Matheus" valor={formatarMoeda(somaMatheus)} />
           <KpiCard titulo="Total Enyo" valor={formatarMoeda(somaEnyo)} />
           <KpiCard
@@ -674,7 +674,7 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
         {balancete.length > 0 && (
           <div className="mt-6 grid gap-6 lg:grid-cols-2">
             <div>
-              <p className="mb-3 text-sm font-semibold text-[#546E7A]">Gastos mensais por pessoa</p>
+              <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Gastos mensais por pessoa</p>
               <div className="h-52">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={balancetePorMes}>
@@ -690,7 +690,7 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
               </div>
             </div>
             <div>
-              <p className="mb-3 text-sm font-semibold text-[#546E7A]">Participação no total</p>
+              <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Participação no total</p>
               <div className="h-52">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
@@ -709,10 +709,10 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
 
       {/* ── Despesas Operacionais ── */}
       <DashSecao titulo="Despesas Operacionais" />
-      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-6 shadow-sm">
+      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
         <div className="grid gap-5 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
           <form onSubmit={handleSalvarDespesa} className="rounded-3xl border border-[#333333] bg-[#181818] p-5">
-            <p className="text-sm font-semibold text-[#546E7A]">Nova despesa</p>
+            <p className="text-sm font-semibold text-[#90A4AE]">Nova despesa</p>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <CampoCadastro label="Data" type="date" value={form.data} onChange={(v) => setForm((f) => ({ ...f, data: v }))} required />
               <SelectCadastro label="Categoria" value={form.categoria} onChange={(v) => setForm((f) => ({ ...f, categoria: v }))} options={CATEGORIAS_DESPESA} placeholder="Selecione..." />
@@ -742,7 +742,7 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
               {despesasFiltradas.length > 0 ? (
                 <div className="max-h-[400px] overflow-auto">
                   <table className="min-w-[480px] w-full bg-[#212121] text-left text-sm">
-                    <thead className="sticky top-0 bg-[#181818] text-[#546E7A]">
+                    <thead className="sticky top-0 bg-[#181818] text-[#90A4AE]">
                       <tr><Th>Data</Th><Th>Categoria</Th><Th>Descrição</Th><Th>Valor</Th><Th>Ações</Th></tr>
                     </thead>
                     <tbody>
@@ -811,12 +811,12 @@ function VendasModulo({
         supabase
           .from("vendas")
           .select("*")
-          .eq("criado_por", usuarioId)
+          
           .order("data", { ascending: false }),
         supabase
           .from("produtos")
           .select("*")
-          .eq("criado_por", usuarioId)
+          
           .eq("ativo", true)
           .order("nome"),
       ]);
@@ -916,7 +916,7 @@ function VendasModulo({
     const produto = venda ? produtos.find((p) => p.id === venda.produtoId) : null;
 
     const supabase = createClient();
-    const { error } = await supabase.from("vendas").delete().eq("id", id).eq("criado_por", usuarioId);
+    const { error } = await supabase.from("vendas").delete().eq("id", id);
 
     if (error) {
       setErro(error.message);
@@ -951,14 +951,14 @@ function VendasModulo({
   const totalItens = vendas.reduce((s, v) => s + v.quantidade, 0);
 
   return (
-    <section className="rounded-3xl border border-[#333333] bg-[#212121] p-6 shadow-sm">
+    <section className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
       <SectionHeader
         tag="Vendas"
         titulo="Registro de vendas"
         descricao="Cadastre vendas por marketplace e acompanhe o faturamento consolidado."
       />
 
-      <div className="mt-5 grid gap-4 sm:grid-cols-3">
+      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
         <KpiCard titulo="Vendas registradas" valor={String(vendas.length)} />
         <KpiCard titulo="Itens vendidos" valor={String(totalItens)} />
         <KpiCard titulo="Receita total" valor={formatarMoeda(totalReceita)} destaque />
@@ -967,9 +967,9 @@ function VendasModulo({
       <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <form
           onSubmit={handleSalvar}
-          className="rounded-3xl border border-[#333333] bg-[#181818] p-5"
+          className="rounded-3xl border border-[#333333] bg-[#181818] p-5 min-w-0"
         >
-          <p className="text-sm font-semibold text-[#546E7A]">Nova venda</p>
+          <p className="text-sm font-semibold text-[#90A4AE]">Nova venda</p>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <CampoCadastro
               label="Data"
@@ -1048,10 +1048,10 @@ function VendasModulo({
           </button>
         </form>
 
-        <div>
+        <div className="min-w-0">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-sm font-semibold text-[#546E7A]">Histórico</p>
+              <p className="text-sm font-semibold text-[#90A4AE]">Histórico</p>
               <h3 className="mt-1 text-xl font-bold">Vendas registradas</h3>
             </div>
             <div className="relative sm:min-w-64">
@@ -1068,9 +1068,9 @@ function VendasModulo({
 
           <div className="mt-4 overflow-hidden rounded-3xl border border-[#333333]">
             {vendasFiltradas.length > 0 ? (
-              <div className="max-h-[480px] overflow-auto">
-                <table className="min-w-[700px] w-full bg-[#212121] text-left text-sm">
-                  <thead className="sticky top-0 bg-[#181818] text-[#546E7A]">
+              <div className="max-h-[480px] overflow-x-auto overflow-y-auto">
+                <table className="w-full min-w-[560px] bg-[#212121] text-left text-sm">
+                  <thead className="sticky top-0 bg-[#181818] text-[#90A4AE]">
                     <tr>
                       <Th>Data</Th>
                       <Th>Marketplace</Th>
@@ -1146,10 +1146,10 @@ function CadastroModulo({
     async function carregar() {
       const supabase = createClient();
       const [{ data: p }, { data: mp }, { data: cl }, { data: fo }] = await Promise.all([
-        supabase.from("produtos").select("*").eq("criado_por", usuarioId).order("nome"),
-        supabase.from("materias_primas").select("*").eq("criado_por", usuarioId).eq("ativo", true).order("nome"),
-        supabase.from("clientes").select("*").eq("criado_por", usuarioId).order("nome"),
-        supabase.from("fornecedores").select("*").eq("criado_por", usuarioId).order("nome"),
+        supabase.from("produtos").select("*").order("nome"),
+        supabase.from("materias_primas").select("*").eq("ativo", true).order("nome"),
+        supabase.from("clientes").select("*").order("nome"),
+        supabase.from("fornecedores").select("*").order("nome"),
       ]);
       if (ativo) {
         setProdutos((p ?? []).map(mapProduto));
@@ -1173,7 +1173,7 @@ function CadastroModulo({
   ];
 
   return (
-    <section className="rounded-3xl border border-[#333333] bg-[#212121] p-6 shadow-sm">
+    <section className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <SectionHeader
           tag="Cadastro"
@@ -1184,7 +1184,7 @@ function CadastroModulo({
           {ABAS_C.map((t) => (
             <button key={t.id} type="button" onClick={() => setAba(t.id)}
               className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
-                aba === t.id ? "bg-[#546E7A] text-white" : "text-[#546E7A] hover:bg-[#2a2a2a]"
+                aba === t.id ? "bg-[#546E7A] text-white" : "text-[#90A4AE] hover:bg-[#2a2a2a]"
               }`}>
               {t.label}
             </button>
@@ -1342,7 +1342,7 @@ function ProdutosSubModulo({
   async function handleExcluir(id: string) {
     if (!confirm("Excluir este produto e seus componentes?")) return;
     const supabase = createClient();
-    const { error } = await supabase.from("produtos").delete().eq("id", id).eq("criado_por", usuarioId);
+    const { error } = await supabase.from("produtos").delete().eq("id", id);
     if (error) { setErro(error.message); return; }
     setProdutos((prev) => prev.filter((p) => p.id !== id));
     if (editandoId === id) limparForm();
@@ -1359,7 +1359,7 @@ function ProdutosSubModulo({
   return (
     <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
       <form onSubmit={handleSalvar} className="rounded-3xl border border-[#333333] bg-[#181818] p-5 self-start">
-        <p className="text-sm font-semibold text-[#546E7A]">{editandoId ? "Editando produto" : "Novo produto"}</p>
+        <p className="text-sm font-semibold text-[#90A4AE]">{editandoId ? "Editando produto" : "Novo produto"}</p>
         <FeedbackBloco mensagem={mensagem} erro={erro} />
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <div>
@@ -1381,7 +1381,7 @@ function ProdutosSubModulo({
         </div>
 
         <div className="mt-5 rounded-2xl border border-[#333333] bg-[#212121] p-4">
-          <p className="mb-3 text-sm font-semibold text-[#546E7A]">Matérias-primas do produto</p>
+          <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Matérias-primas do produto</p>
           {carregandoComp ? (
             <p className="py-2 text-xs text-[#78909C]">Carregando componentes...</p>
           ) : (
@@ -1389,7 +1389,7 @@ function ProdutosSubModulo({
               {componentesAtivos.length > 0 && (
                 <div className="mb-3 overflow-hidden rounded-xl border border-[#2a2a2a]">
                   <table className="w-full text-left text-xs">
-                    <thead className="bg-[#181818] text-[#546E7A]">
+                    <thead className="bg-[#181818] text-[#90A4AE]">
                       <tr><Th>Matéria-prima</Th><Th>Qtd</Th>{editandoId && <Th>Link</Th>}<Th>{" "}</Th></tr>
                     </thead>
                     <tbody>
@@ -1398,7 +1398,7 @@ function ProdutosSubModulo({
                             <tr key={c.id} className="border-t border-[#2a2a2a]">
                               <Td className="font-semibold">{c.nomePeca}</Td>
                               <Td>{c.quantidade}</Td>
-                              <Td>{c.linkCompra ? <a href={c.linkCompra} target="_blank" rel="noopener noreferrer" className="text-[#546E7A] underline">ver</a> : <span className="text-[#90A4AE]">—</span>}</Td>
+                              <Td>{c.linkCompra ? <a href={c.linkCompra} target="_blank" rel="noopener noreferrer" className="text-[#90A4AE] underline">ver</a> : <span className="text-[#90A4AE]">—</span>}</Td>
                               <Td><button type="button" onClick={() => removerCompEdicao(c.id)} className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-red-900/50 text-red-400 hover:bg-red-900/20"><X className="h-3 w-3" /></button></Td>
                             </tr>
                           ))
@@ -1413,37 +1413,49 @@ function ProdutosSubModulo({
                   </table>
                 </div>
               )}
-              <div className="grid gap-2 sm:grid-cols-[1fr_80px_auto]">
+              <div className="flex flex-col gap-2">
                 <select value={formComp.materiaPrimaId}
                   onChange={(e) => selecionarMP(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
-                  className="h-10 rounded-xl border border-[#333333] bg-[#212121] px-3 text-sm outline-none focus:border-[#546E7A]">
+                  className="h-10 w-full rounded-xl border border-[#333333] bg-[#212121] px-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]">
                   <option value="">Selecionar matéria-prima...</option>
                   {materiasPrimas.map((mp) => (
                     <option key={mp.id} value={mp.id}>{mp.codigo ? `[${mp.codigo}] ` : ""}{mp.nome}</option>
                   ))}
                 </select>
-                <input
-                  type="text"
-                  value={formComp.quantidade}
-                  onChange={(e) => setFormComp((f) => ({ ...f, quantidade: e.target.value }))}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      if (formComp.nomePeca && !salvandoComp) {
-                        editandoId ? adicionarCompEdicao(editandoId) : adicionarCompRascunho();
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={formComp.quantidade}
+                    onChange={(e) => setFormComp((f) => ({ ...f, quantidade: e.target.value }))}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        if (formComp.nomePeca && !salvandoComp) {
+                          editandoId ? adicionarCompEdicao(editandoId) : adicionarCompRascunho();
+                        }
                       }
-                    }
-                  }}
-                  placeholder="Qtd"
-                  className="h-10 rounded-xl border border-[#333333] bg-[#212121] px-3 text-sm outline-none focus:border-[#546E7A]"
-                />
-                <button type="button"
-                  onClick={editandoId ? () => adicionarCompEdicao(editandoId) : adicionarCompRascunho}
-                  disabled={salvandoComp}
-                  className="inline-flex h-10 items-center gap-1 rounded-xl bg-[#546E7A] px-3 text-xs font-semibold text-white disabled:opacity-50">
-                  <Plus className="h-3.5 w-3.5" />{salvandoComp ? "..." : "Adicionar"}
-                </button>
+                    }}
+                    placeholder="Qtd"
+                    className="h-10 w-24 rounded-xl border border-[#333333] bg-[#212121] px-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+                  />
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      if (editandoId) {
+                        adicionarCompEdicao(editandoId);
+                      } else {
+                        adicionarCompRascunho();
+                      }
+                    }}
+                    disabled={salvandoComp}
+                    className="inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#546E7A] px-4 text-sm font-semibold text-white transition hover:bg-[#455A64] disabled:opacity-50"
+                  >
+                    <Plus className="h-4 w-4 shrink-0" />
+                    {salvandoComp ? "Salvando..." : "Adicionar"}
+                  </button>
+                </div>
               </div>
               {materiasPrimas.length === 0 && (
                 <p className="mt-2 text-xs text-amber-400">Cadastre matérias-primas na aba <strong>Matérias-primas</strong> primeiro.</p>
@@ -1480,7 +1492,7 @@ function ProdutosSubModulo({
           {produtosFiltrados.length > 0 ? (
             <div className="max-h-[600px] overflow-auto">
               <table className="min-w-[420px] w-full bg-[#212121] text-left text-sm">
-                <thead className="sticky top-0 bg-[#181818] text-[#546E7A]">
+                <thead className="sticky top-0 bg-[#181818] text-[#90A4AE]">
                   <tr><Th>Código</Th><Th>Nome</Th><Th>Categoria</Th><Th>Ativo</Th><Th>Ações</Th></tr>
                 </thead>
                 <tbody>
@@ -1610,7 +1622,7 @@ function MateriasPrimasSubModulo({
   async function handleExcluir(id: string) {
     if (!confirm("Excluir esta matéria-prima?")) return;
     const supabase = createClient();
-    const { error } = await supabase.from("materias_primas").delete().eq("id", id).eq("criado_por", usuarioId);
+    const { error } = await supabase.from("materias_primas").delete().eq("id", id);
     if (error) { setErro(error.message); return; }
     setMateriasPrimas((prev) => prev.filter((m) => m.id !== id));
     setMensagem("Matéria-prima removida.");
@@ -1624,7 +1636,7 @@ function MateriasPrimasSubModulo({
   return (
     <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
       <form onSubmit={handleSalvar} className="rounded-3xl border border-[#333333] bg-[#181818] p-5">
-        <p className="text-sm font-semibold text-[#546E7A]">
+        <p className="text-sm font-semibold text-[#90A4AE]">
           {editandoId ? "Editando matéria-prima" : "Nova matéria-prima"}
         </p>
         <FeedbackBloco mensagem={mensagem} erro={erro} />
@@ -1676,7 +1688,7 @@ function MateriasPrimasSubModulo({
           {filtradas.length > 0 ? (
             <div className="max-h-[480px] overflow-auto">
               <table className="min-w-[580px] w-full bg-[#212121] text-left text-sm">
-                <thead className="sticky top-0 bg-[#181818] text-[#546E7A]">
+                <thead className="sticky top-0 bg-[#181818] text-[#90A4AE]">
                   <tr>
                     <Th>Código</Th>
                     <Th>Nome</Th>
@@ -1694,7 +1706,7 @@ function MateriasPrimasSubModulo({
                       <Td>
                         {m.linkCompra ? (
                           <a href={m.linkCompra} target="_blank" rel="noopener noreferrer"
-                            className="text-[#546E7A] underline text-xs">Ver</a>
+                            className="text-[#90A4AE] underline text-xs">Ver</a>
                         ) : <span className="text-[#90A4AE]">—</span>}
                       </Td>
                       <Td>
@@ -1780,7 +1792,7 @@ function ClientesSubModulo({
   async function handleExcluir(id: string) {
     if (!confirm("Excluir este cliente?")) return;
     const supabase = createClient();
-    const { error } = await supabase.from("clientes").delete().eq("id", id).eq("criado_por", usuarioId);
+    const { error } = await supabase.from("clientes").delete().eq("id", id);
     if (error) { setErro(error.message); return; }
     setClientes((prev) => prev.filter((c) => c.id !== id));
     if (editandoId === id) limpar();
@@ -1795,7 +1807,7 @@ function ClientesSubModulo({
   return (
     <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
       <form onSubmit={handleSalvar} className="rounded-3xl border border-[#333333] bg-[#181818] p-5 self-start">
-        <p className="text-sm font-semibold text-[#546E7A]">{editandoId ? "Editando cliente" : "Novo cliente"}</p>
+        <p className="text-sm font-semibold text-[#90A4AE]">{editandoId ? "Editando cliente" : "Novo cliente"}</p>
         <FeedbackBloco mensagem={mensagem} erro={erro} />
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
@@ -1833,7 +1845,7 @@ function ClientesSubModulo({
           {filtrados.length > 0 ? (
             <div className="max-h-[480px] overflow-auto">
               <table className="min-w-[500px] w-full bg-[#212121] text-left text-sm">
-                <thead className="sticky top-0 bg-[#181818] text-[#546E7A]">
+                <thead className="sticky top-0 bg-[#181818] text-[#90A4AE]">
                   <tr><Th>Nome</Th><Th>Contato</Th><Th>Cidade</Th><Th>Ações</Th></tr>
                 </thead>
                 <tbody>
@@ -1921,7 +1933,7 @@ function FornecedoresSubModulo({
   async function handleExcluir(id: string) {
     if (!confirm("Excluir este fornecedor?")) return;
     const supabase = createClient();
-    const { error } = await supabase.from("fornecedores").delete().eq("id", id).eq("criado_por", usuarioId);
+    const { error } = await supabase.from("fornecedores").delete().eq("id", id);
     if (error) { setErro(error.message); return; }
     setFornecedores((prev) => prev.filter((f) => f.id !== id));
     if (editandoId === id) limpar();
@@ -1931,7 +1943,7 @@ function FornecedoresSubModulo({
   return (
     <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
       <form onSubmit={handleSalvar} className="rounded-3xl border border-[#333333] bg-[#181818] p-5 self-start">
-        <p className="text-sm font-semibold text-[#546E7A]">{editandoId ? "Editando fornecedor" : "Novo fornecedor"}</p>
+        <p className="text-sm font-semibold text-[#90A4AE]">{editandoId ? "Editando fornecedor" : "Novo fornecedor"}</p>
         <FeedbackBloco mensagem={mensagem} erro={erro} />
         <div className="mt-4 grid gap-4">
           <CampoCadastro label="Nome / Razão social" value={form.nome} onChange={(v) => setForm((f) => ({ ...f, nome: v }))} placeholder="Nome do fornecedor" required />
@@ -1957,7 +1969,7 @@ function FornecedoresSubModulo({
           {fornecedores.length > 0 ? (
             <div className="max-h-[480px] overflow-auto">
               <table className="min-w-[400px] w-full bg-[#212121] text-left text-sm">
-                <thead className="sticky top-0 bg-[#181818] text-[#546E7A]">
+                <thead className="sticky top-0 bg-[#181818] text-[#90A4AE]">
                   <tr><Th>Nome</Th><Th>Contato</Th><Th>Observação</Th><Th>Ações</Th></tr>
                 </thead>
                 <tbody>
@@ -2007,9 +2019,9 @@ function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
     setCarregando(true);
     const supabase = createClient();
     const [{ data: prod }, { data: v }, { data: pf }] = await Promise.all([
-      supabase.from("produtos").select("*").eq("criado_por", usuarioId).eq("ativo", true).order("nome"),
-      supabase.from("vendas").select("*").eq("criado_por", usuarioId),
-      supabase.from("pedidos_fabricacao").select("*").eq("criado_por", usuarioId),
+      supabase.from("produtos").select("*").eq("ativo", true).order("nome"),
+      supabase.from("vendas").select("*"),
+      supabase.from("pedidos_fabricacao").select("*"),
     ]);
     setProdutos((prod ?? []).map(mapProduto));
     setVendas((v ?? []).map(mapVenda));
@@ -2047,14 +2059,14 @@ function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
   if (carregando) return <EstadoCarregando texto="Carregando estoque..." />;
 
   return (
-    <section className="rounded-3xl border border-[#333333] bg-[#212121] p-6 shadow-sm">
+    <section className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
       <SectionHeader
         tag="Estoque"
         titulo="Inventário de produtos"
         descricao="Saldo calculado automaticamente: entradas via fabricação e saídas via vendas."
       />
 
-      <div className="mt-5 grid gap-4 sm:grid-cols-3">
+      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
         <KpiCard titulo="Unidades em estoque" valor={String(totalUnidades)} />
         <KpiCard titulo="Abaixo do mínimo" valor={String(abaixoMinimo.length)} alerta={abaixoMinimo.length > 0} />
         <KpiCard titulo="Capital em estoque" valor={formatarMoeda(capitalTotal)} destaque />
@@ -2085,7 +2097,7 @@ function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
         {movimentosFiltrados.length > 0 ? (
           <div className="overflow-auto">
             <table className="min-w-[820px] w-full bg-[#212121] text-left text-sm">
-              <thead className="bg-[#181818] text-[#546E7A]">
+              <thead className="bg-[#181818] text-[#90A4AE]">
                 <tr>
                   <Th>Código</Th>
                   <Th>Produto</Th>
@@ -2111,7 +2123,7 @@ function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
                         <span className="font-semibold text-red-600">{saidas}</span>
                       </Td>
                       <Td>
-                        <span className={`font-bold text-base ${abaixo ? "text-red-600" : "text-[#546E7A]"}`}>
+                        <span className={`font-bold text-base ${abaixo ? "text-red-600" : "text-[#90A4AE]"}`}>
                           {saldo}
                         </span>
                         {abaixo && (
@@ -2132,10 +2144,10 @@ function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
                   <td colSpan={4} className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-[#78909C]">
                     Total
                   </td>
-                  <td className="px-4 py-3 font-bold text-[#546E7A]">{totalUnidades}</td>
+                  <td className="px-4 py-3 font-bold text-[#90A4AE]">{totalUnidades}</td>
                   <td />
                   <td />
-                  <td className="px-4 py-3 font-bold text-[#546E7A]">{formatarMoeda(capitalTotal)}</td>
+                  <td className="px-4 py-3 font-bold text-[#90A4AE]">{formatarMoeda(capitalTotal)}</td>
                 </tr>
               </tfoot>
             </table>
@@ -2182,12 +2194,12 @@ function ComprasModulo({
         supabase
           .from("pedidos_compra")
           .select("*, fornecedores(nome)")
-          .eq("criado_por", usuarioId)
+          
           .order("data", { ascending: false }),
         supabase
           .from("fornecedores")
           .select("*")
-          .eq("criado_por", usuarioId)
+          
           .order("nome"),
       ]);
       if (ativo) {
@@ -2243,14 +2255,14 @@ function ComprasModulo({
   if (carregando) return <EstadoCarregando texto="Carregando compras..." />;
 
   return (
-    <section className="rounded-3xl border border-[#333333] bg-[#212121] p-6 shadow-sm">
+    <section className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <SectionHeader
           tag="Compras"
           titulo="Pedidos de compra"
           descricao="Registre pedidos de compra e ordens de fabricação."
         />
-        <div className="flex gap-2 rounded-3xl border border-[#333333] bg-[#181818] p-2">
+        <div className="flex flex-wrap gap-2 rounded-3xl border border-[#333333] bg-[#181818] p-2 self-start">
           {(["pedidos", "fabricacao"] as const).map((t) => (
             <button
               key={t}
@@ -2259,7 +2271,7 @@ function ComprasModulo({
               className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
                 aba === t
                   ? "bg-[#546E7A] text-white"
-                  : "text-[#546E7A] hover:bg-[#2a2a2a]"
+                  : "text-[#90A4AE] hover:bg-[#2a2a2a]"
               }`}
             >
               {t === "pedidos" ? "Pedidos" : "Fabricação"}
@@ -2268,7 +2280,7 @@ function ComprasModulo({
         </div>
       </div>
 
-      <div className="mt-5 grid gap-4 sm:grid-cols-3">
+      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
         <KpiCard titulo="Total de pedidos" valor={String(pedidos.length)} />
         <KpiCard titulo="Pedidos pendentes" valor={String(pendentes)} alerta={pendentes > 0} />
         <KpiCard titulo="Total em compras" valor={formatarMoeda(totalCompras)} />
@@ -2282,14 +2294,14 @@ function ComprasModulo({
             onSubmit={handleSalvarPedido}
             className="rounded-3xl border border-[#333333] bg-[#181818] p-5"
           >
-            <p className="text-sm font-semibold text-[#546E7A]">Novo pedido</p>
+            <p className="text-sm font-semibold text-[#90A4AE]">Novo pedido</p>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <div className="sm:col-span-2">
                 <label className="mb-1 block text-sm font-medium">Fornecedor</label>
                 <select
                   value={formPedido.fornecedorId}
                   onChange={(e) => setFormPedido((f) => ({ ...f, fornecedorId: e.target.value }))}
-                  className="w-full rounded-2xl border border-[#333333] bg-[#212121] px-4 py-3 text-sm outline-none focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+                  className="w-full rounded-2xl border border-[#333333] bg-[#212121] px-4 py-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
                 >
                   <option value="">Selecione...</option>
                   {fornecedores.map((f) => (
@@ -2322,7 +2334,7 @@ function ComprasModulo({
             {pedidos.length > 0 ? (
               <div className="max-h-[480px] overflow-auto">
                 <table className="min-w-[560px] w-full bg-[#212121] text-left text-sm">
-                  <thead className="sticky top-0 bg-[#181818] text-[#546E7A]">
+                  <thead className="sticky top-0 bg-[#181818] text-[#90A4AE]">
                     <tr>
                       <Th>Data</Th>
                       <Th>Fornecedor</Th>
@@ -2345,7 +2357,7 @@ function ComprasModulo({
                                 ? "bg-emerald-900/20 text-emerald-400"
                                 : p.status === "cancelado"
                                 ? "bg-red-900/20 text-red-400"
-                                : "bg-amber-100 text-amber-400"
+                                : "bg-amber-900/30 text-amber-400"
                             }`}
                           >
                             <option value="pendente">Pendente</option>
@@ -2407,8 +2419,8 @@ function FabricacaoSubModulo({
     async function carregar() {
       const supabase = createClient();
       const [{ data: p }, { data: ped }] = await Promise.all([
-        supabase.from("produtos").select("*").eq("criado_por", usuarioId).eq("ativo", true).order("nome"),
-        supabase.from("pedidos_fabricacao").select("*").eq("criado_por", usuarioId).order("data", { ascending: false }).limit(50),
+        supabase.from("produtos").select("*").eq("ativo", true).order("nome"),
+        supabase.from("pedidos_fabricacao").select("*").order("data", { ascending: false }).limit(50),
       ]);
       if (ativo) {
         setProdutos((p ?? []).map(mapProduto));
@@ -2536,7 +2548,7 @@ function FabricacaoSubModulo({
 
       {/* Formulário de novo pedido */}
       <div className="rounded-3xl border border-[#333333] bg-[#181818] p-5">
-        <p className="text-sm font-semibold text-[#546E7A]">Novo pedido de fabricação</p>
+        <p className="text-sm font-semibold text-[#90A4AE]">Novo pedido de fabricação</p>
 
         <div className="mt-4 grid gap-4 sm:grid-cols-3">
           <div className="sm:col-span-2">
@@ -2544,7 +2556,7 @@ function FabricacaoSubModulo({
             <select
               value={produtoId}
               onChange={(e) => { setProdutoId(e.target.value); setComponentesCarregados(false); setItens([]); }}
-              className="w-full rounded-2xl border border-[#333333] bg-[#212121] px-4 py-3 text-sm outline-none focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+              className="w-full rounded-2xl border border-[#333333] bg-[#212121] px-4 py-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
             >
               <option value="">Selecione o produto...</option>
               {produtos.map((p) => (
@@ -2573,7 +2585,7 @@ function FabricacaoSubModulo({
           <>
             <div className="mt-5 overflow-auto rounded-2xl border border-[#333333]">
               <table className="min-w-[800px] w-full bg-[#212121] text-left text-sm">
-                <thead className="bg-[#181818] text-[#546E7A]">
+                <thead className="bg-[#181818] text-[#90A4AE]">
                   <tr>
                     <Th>Nome da Peça</Th>
                     <Th>Qtd/un</Th>
@@ -2589,18 +2601,18 @@ function FabricacaoSubModulo({
                     <tr key={it.componenteId} className="border-t border-[#2a2a2a]">
                       <Td className="font-semibold">{it.nomePeca}</Td>
                       <Td>{it.qtdPc}</Td>
-                      <Td className="font-semibold text-[#546E7A]">{qtdTotal(it.qtdPc)}</Td>
+                      <Td className="font-semibold text-[#90A4AE]">{qtdTotal(it.qtdPc)}</Td>
                       <Td>
                         {it.linkCompra ? (
                           <a href={it.linkCompra} target="_blank" rel="noopener noreferrer"
-                            className="text-[#546E7A] underline text-xs">Ver</a>
+                            className="text-[#90A4AE] underline text-xs">Ver</a>
                         ) : <span className="text-[#90A4AE]">—</span>}
                       </Td>
                       <Td>
                         <select
                           value={it.fornecedorNome}
                           onChange={(e) => atualizarItem(idx, "fornecedorNome", e.target.value)}
-                          className="w-36 rounded-xl border border-[#333333] bg-[#212121] px-2 py-1.5 text-xs outline-none focus:border-[#546E7A]"
+                          className="w-36 rounded-xl border border-[#333333] bg-[#212121] px-2 py-1.5 text-xs text-[#ECEFF1] outline-none focus:border-[#546E7A]"
                         >
                           <option value="">—</option>
                           {fornecedores.map((f) => (
@@ -2613,7 +2625,7 @@ function FabricacaoSubModulo({
                           type="text"
                           value={it.precoUnitario}
                           onChange={(e) => atualizarItem(idx, "precoUnitario", e.target.value)}
-                          className="w-24 rounded-xl border border-[#333333] bg-[#212121] px-2 py-1.5 text-xs outline-none focus:border-[#546E7A]"
+                          className="w-24 rounded-xl border border-[#333333] bg-[#212121] px-2 py-1.5 text-xs text-[#ECEFF1] outline-none focus:border-[#546E7A]"
                           placeholder="0,00"
                         />
                       </Td>
@@ -2627,7 +2639,7 @@ function FabricacaoSubModulo({
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
               <p className="text-sm font-semibold">
                 Custo total estimado:{" "}
-                <span className="text-[#546E7A]">{formatarMoeda(valorTotalGeral)}</span>
+                <span className="text-[#90A4AE]">{formatarMoeda(valorTotalGeral)}</span>
               </p>
               <button
                 type="button"
@@ -2644,13 +2656,13 @@ function FabricacaoSubModulo({
       </div>
 
       {/* Histórico */}
-      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-6 shadow-sm">
-        <p className="text-sm font-semibold text-[#546E7A]">Histórico de fabricação</p>
+      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
+        <p className="text-sm font-semibold text-[#90A4AE]">Histórico de fabricação</p>
         <div className="mt-4 overflow-hidden rounded-3xl border border-[#333333]">
           {pedidos.length > 0 ? (
             <div className="max-h-72 overflow-auto">
               <table className="min-w-[560px] w-full bg-[#212121] text-left text-sm">
-                <thead className="sticky top-0 bg-[#181818] text-[#546E7A]">
+                <thead className="sticky top-0 bg-[#181818] text-[#90A4AE]">
                   <tr>
                     <Th>Data</Th>
                     <Th>Produto</Th>
@@ -2664,7 +2676,7 @@ function FabricacaoSubModulo({
                       <Td>{formatarData(p.data)}</Td>
                       <Td className="font-semibold">{p.produtoNome}</Td>
                       <Td>{p.qtdFabricada}</Td>
-                      <Td className="font-semibold text-[#546E7A]">{formatarMoeda(p.valorTotal)}</Td>
+                      <Td className="font-semibold text-[#90A4AE]">{formatarMoeda(p.valorTotal)}</Td>
                     </tr>
                   ))}
                 </tbody>
@@ -2703,7 +2715,7 @@ function BalanceteModulo({ usuarioId, dataHoje }: { usuarioId: string; dataHoje:
       const { data } = await supabase
         .from("balancete")
         .select("*")
-        .eq("criado_por", usuarioId)
+        
         .order("data", { ascending: false });
       if (ativo) {
         setItens((data ?? []).map(mapItemBalancete));
@@ -2749,7 +2761,7 @@ function BalanceteModulo({ usuarioId, dataHoje }: { usuarioId: string; dataHoje:
   async function handleExcluir(id: string) {
     if (!confirm("Excluir este item?")) return;
     const supabase = createClient();
-    const { error } = await supabase.from("balancete").delete().eq("id", id).eq("criado_por", usuarioId);
+    const { error } = await supabase.from("balancete").delete().eq("id", id);
     if (error) { setErro(error.message); return; }
     setItens((prev) => prev.filter((i) => i.id !== id));
     setMensagem("Item removido.");
@@ -2769,7 +2781,7 @@ function BalanceteModulo({ usuarioId, dataHoje }: { usuarioId: string; dataHoje:
   return (
     <section className="space-y-6">
       {/* Formulário */}
-      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-6 shadow-sm">
+      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
         <SectionHeader tag="Balancete" titulo="Registrar item" descricao="Adicione despesas e compras de cada sócio para calcular o balancete." />
         <form onSubmit={handleSalvar} className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <CampoCadastro label="Data *" type="date" value={form.data} onChange={(v) => setForm((f) => ({ ...f, data: v }))} required />
@@ -2788,7 +2800,7 @@ function BalanceteModulo({ usuarioId, dataHoje }: { usuarioId: string; dataHoje:
           <div className="flex items-end">
             <div className="flex-1 rounded-2xl border border-[#333333] bg-[#181818] px-4 py-3 text-sm">
               <p className="text-xs text-[#78909C]">Valor total</p>
-              <p className="font-bold text-[#546E7A]">{formatarMoeda(valorTotalForm)}</p>
+              <p className="font-bold text-[#90A4AE]">{formatarMoeda(valorTotalForm)}</p>
             </div>
           </div>
           <div className="sm:col-span-2 xl:col-span-3">
@@ -2803,7 +2815,7 @@ function BalanceteModulo({ usuarioId, dataHoje }: { usuarioId: string; dataHoje:
       </div>
 
       {/* Resumo */}
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <KpiCard titulo="Total Matheus" valor={formatarMoeda(somaMatheus)} />
         <KpiCard titulo="Total Enyo" valor={formatarMoeda(somaEnyo)} />
         <KpiCard
@@ -2814,10 +2826,10 @@ function BalanceteModulo({ usuarioId, dataHoje }: { usuarioId: string; dataHoje:
       </div>
 
       {/* Tabela */}
-      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-6 shadow-sm">
+      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-lg font-bold">Itens registrados</h3>
-          <div className="relative w-60">
+          <div className="relative w-full sm:w-60">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#90A4AE]" />
             <input type="search" value={termoBusca} onChange={(e) => setTermoBusca(e.target.value)}
               className="h-10 w-full rounded-2xl border border-[#333333] bg-[#141414] pl-9 pr-4 text-sm text-[#ECEFF1] outline-none placeholder:text-[#546E7A] focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
@@ -2828,7 +2840,7 @@ function BalanceteModulo({ usuarioId, dataHoje }: { usuarioId: string; dataHoje:
           {itensFiltrados.length > 0 ? (
             <div className="overflow-auto">
               <table className="min-w-[720px] w-full bg-[#212121] text-left text-sm">
-                <thead className="sticky top-0 bg-[#181818] text-[#546E7A]">
+                <thead className="sticky top-0 bg-[#181818] text-[#90A4AE]">
                   <tr>
                     <Th>Data</Th>
                     <Th>Nome do item</Th>
@@ -2846,7 +2858,7 @@ function BalanceteModulo({ usuarioId, dataHoje }: { usuarioId: string; dataHoje:
                       <Td>{item.nomeItem}</Td>
                       <Td>{formatarMoeda(item.valorUnitario)}</Td>
                       <Td>{item.quantidade}</Td>
-                      <Td className="font-semibold text-[#546E7A]">{formatarMoeda(item.valorTotal)}</Td>
+                      <Td className="font-semibold text-[#90A4AE]">{formatarMoeda(item.valorTotal)}</Td>
                       <Td>
                         <span className={`rounded-full px-3 py-0.5 text-xs font-semibold ${
                           item.nomeComprador === "Matheus"
@@ -2867,8 +2879,8 @@ function BalanceteModulo({ usuarioId, dataHoje }: { usuarioId: string; dataHoje:
                 </tbody>
                 <tfoot className="border-t-2 border-[#333333] bg-[#181818]">
                   <tr>
-                    <Td colSpan={4} className="font-bold text-[#546E7A]">Total geral</Td>
-                    <Td className="font-bold text-[#546E7A]">{formatarMoeda(itens.reduce((s, i) => s + i.valorTotal, 0))}</Td>
+                    <Td colSpan={4} className="font-bold text-[#90A4AE]">Total geral</Td>
+                    <Td className="font-bold text-[#90A4AE]">{formatarMoeda(itens.reduce((s, i) => s + i.valorTotal, 0))}</Td>
                     <Td colSpan={2}>{""}</Td>
                   </tr>
                 </tfoot>
@@ -2943,7 +2955,7 @@ function UsuariosModulo({ usuarioId }: { usuarioId: string }) {
     <section className="space-y-6">
       <FeedbackBloco mensagem={mensagem} erro={erro} />
 
-      <div className="rounded-3xl border border-amber-800/40 bg-[#212121] p-6 shadow-sm">
+      <div className="rounded-3xl border border-amber-800/40 bg-[#212121] p-4 sm:p-6 shadow-sm">
         <SectionHeader
           tag="Pendentes"
           titulo="Aguardando aprovação"
@@ -2955,7 +2967,7 @@ function UsuariosModulo({ usuarioId }: { usuarioId: string }) {
           ) : (
             <div className="overflow-hidden rounded-3xl border border-amber-800/40">
               <table className="w-full bg-[#212121] text-left text-sm">
-                <thead className="bg-amber-50">
+                <thead className="bg-amber-900/20 text-[#ECEFF1]">
                   <tr>
                     <Th>Nome</Th>
                     <Th>E-mail</Th>
@@ -2964,7 +2976,7 @@ function UsuariosModulo({ usuarioId }: { usuarioId: string }) {
                 </thead>
                 <tbody>
                   {pendentes.map((m) => (
-                    <tr key={m.id} className="border-t border-amber-100">
+                    <tr key={m.id} className="border-t border-amber-900/20">
                       <Td className="font-semibold">{m.nome || "-"}</Td>
                       <Td>{m.email || "-"}</Td>
                       <Td>
@@ -2997,7 +3009,7 @@ function UsuariosModulo({ usuarioId }: { usuarioId: string }) {
         </div>
       </div>
 
-      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-6 shadow-sm">
+      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
         <SectionHeader
           tag="Acessos"
           titulo="Usuários com acesso"
@@ -3008,7 +3020,7 @@ function UsuariosModulo({ usuarioId }: { usuarioId: string }) {
             <EstadoTabelaVazia texto="Nenhum usuário com acesso." />
           ) : (
             <table className="w-full bg-[#212121] text-left text-sm">
-              <thead className="bg-[#181818] text-[#546E7A]">
+              <thead className="bg-[#181818] text-[#90A4AE]">
                 <tr>
                   <Th>Nome</Th>
                   <Th>E-mail</Th>
@@ -3059,7 +3071,7 @@ function DashSecao({ titulo }: { titulo: string }) {
   return (
     <div className="flex items-center gap-4">
       <div className="h-px flex-1 bg-[#CFD8DC]" />
-      <span className="text-xs font-bold uppercase tracking-widest text-[#546E7A]">
+      <span className="text-xs font-bold uppercase tracking-widest text-[#78909C]">
         {titulo}
       </span>
       <div className="h-px flex-1 bg-[#CFD8DC]" />
@@ -3092,7 +3104,7 @@ function KpiCard({
         {titulo}
       </p>
       <p
-        className={`mt-1.5 text-xl font-bold ${
+        className={`mt-1.5 text-base sm:text-xl font-bold truncate ${
           destaque
             ? "text-[#90A4AE]"
             : alerta
@@ -3117,7 +3129,7 @@ function SectionHeader({
 }) {
   return (
     <div>
-      <p className="text-sm font-semibold text-[#546E7A]">{tag}</p>
+      <p className="text-sm font-semibold text-[#90A4AE]">{tag}</p>
       <h2 className="mt-1 text-2xl font-bold">{titulo}</h2>
       {descricao && (
         <p className="mt-2 max-w-2xl text-sm leading-6 text-[#78909C]">
@@ -3256,10 +3268,10 @@ function FeedbackBloco({
 
 function MarketplaceBadge({ marketplace }: { marketplace: Marketplace }) {
   const cores: Record<Marketplace, string> = {
-    "Mercado Livre": "bg-yellow-100 text-yellow-800",
-    Shopee: "bg-orange-100 text-orange-700",
-    "Site Próprio": "bg-blue-100 text-blue-700",
-    Outro: "bg-gray-100 text-gray-700",
+    "Mercado Livre": "bg-yellow-900/30 text-yellow-400",
+    Shopee: "bg-orange-900/30 text-orange-400",
+    "Site Próprio": "bg-blue-900/30 text-blue-400",
+    Outro: "bg-[#2a2a2a] text-[#90A4AE]",
   };
   return (
     <span

@@ -60,9 +60,9 @@ export default async function DashboardPage({
   const isAdmin = vinculo?.papel === "admin" || vinculo?.papel === "socio";
 
   return (
-    <main className="min-h-screen bg-[#1e1e1e] px-6 py-8 text-[#ECEFF1]">
+    <main className="min-h-screen bg-[#1e1e1e] px-3 py-5 sm:px-6 sm:py-8 text-[#ECEFF1]">
       <section className="mx-auto max-w-7xl">
-        <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div className="flex flex-col gap-2">
             <Link
               href="/app"
@@ -91,7 +91,7 @@ export default async function DashboardPage({
                 className="h-9 w-auto object-contain"
               />
             </div>
-            <h1 className="text-3xl font-bold tracking-tight md:text-4xl">
+            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl md:text-4xl">
               Olá, {nomeUsuario}
             </h1>
             <p className="max-w-2xl text-sm leading-6 text-[#78909C] md:text-base">
@@ -100,7 +100,7 @@ export default async function DashboardPage({
             </p>
           </div>
 
-          <div className="flex shrink-0 items-center gap-3 rounded-3xl border border-white/10 bg-white/5 backdrop-blur-sm p-3 shadow-sm">
+          <div className="flex self-start items-center gap-3 rounded-3xl border border-white/10 bg-white/5 backdrop-blur-sm p-3 shadow-sm sm:shrink-0">
             <div className="flex flex-col md:items-end">
               <span className="max-w-[220px] truncate text-sm font-semibold text-[#90A4AE]">
                 {nomeUsuario}

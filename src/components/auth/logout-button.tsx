@@ -37,7 +37,7 @@ export default function LogoutButton({
       disabled={loading}
       className={
         className ??
-        "inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-[#90caf9] bg-white px-4 text-sm font-semibold text-[#1565c0] transition hover:bg-[#e3f0ff] disabled:cursor-not-allowed disabled:opacity-60"
+        "inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-[#333333] bg-[#2a2a2a] px-4 text-sm font-semibold text-[#90A4AE] transition hover:bg-[#333333] disabled:cursor-not-allowed disabled:opacity-60"
       }
     >
       <LogOut className="h-4 w-4" />
