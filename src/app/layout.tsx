@@ -21,6 +21,9 @@ const oswald = Oswald({
 export const metadata: Metadata = {
   title: "Eksteel System",
   description: "Sistema de gestão financeira e operacional — Eksteel.",
+  icons: {
+    icon: "/images/logo-simple.png",
+  },
 };
 
 export default function RootLayout({
