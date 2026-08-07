@@ -133,6 +133,17 @@ type ComponenteProduto = {
   linkCompra: string;
 };
 
+type ItemFabricacao = {
+  id: string;
+  pedidoId: string;
+  nomePeca: string;
+  qtdPc: number;
+  qtdTotal: number;
+  fornecedorNome: string;
+  precoUnitario: number;
+  precoTotal: number;
+};
+
 type ItemFabricacaoRascunho = {
   componenteId: string;
   nomePeca: string;
@@ -268,6 +279,16 @@ function formatarData(iso: string) {
   return `${dia}/${mes}/${ano}`;
 }
 
+// Valor bruto: quantidade × valor unitário, sem nenhum desconto.
+function totalBrutoVenda(v: Venda) {
+  return v.valorUnitario * v.quantidade;
+}
+
+// Valor líquido: bruto menos desconto concedido e taxa cobrada pelo marketplace — o que realmente entra no caixa.
+function totalLiquidoVenda(v: Venda) {
+  return v.valorUnitario * v.quantidade - v.desconto - v.taxaMarketplace;
+}
+
 // ─── Root component ───────────────────────────────────────────────────────────
 
 export default function DashboardTabs({
@@ -349,6 +370,11 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
   const [erro, setErro] = useState("");
   const [form, setForm] = useState({ data: dataHoje, categoria: "", descricao: "", valor: "" });
 
+  const [despesaSelecionada, setDespesaSelecionada] = useState<Despesa | null>(null);
+  const [editandoDetalhe, setEditandoDetalhe] = useState(false);
+  const [salvandoDetalhe, setSalvandoDetalhe] = useState(false);
+  const [formDetalhe, setFormDetalhe] = useState({ data: "", categoria: "", descricao: "", valor: "" });
+
   useEffect(() => {
     let ativo = true;
     async function carregar() {
@@ -401,11 +427,62 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
     setMensagem("Despesa removida.");
   }
 
+  function abrirDetalheDespesa(despesa: Despesa) {
+    setDespesaSelecionada(despesa);
+    setEditandoDetalhe(false);
+    setFormDetalhe({
+      data: despesa.data,
+      categoria: despesa.categoria,
+      descricao: despesa.descricao,
+      valor: String(despesa.valor).replace(".", ","),
+    });
+  }
+
+  function fecharDetalheDespesa() {
+    setDespesaSelecionada(null);
+    setEditandoDetalhe(false);
+  }
+
+  async function handleSalvarDetalheDespesa() {
+    if (!despesaSelecionada) return;
+    if (!formDetalhe.data || !formDetalhe.descricao.trim() || !formDetalhe.valor) {
+      setErro("Preencha data, descrição e valor.");
+      return;
+    }
+    setSalvandoDetalhe(true);
+    setErro("");
+    const supabase = createClient();
+    const payload = {
+      data: formDetalhe.data,
+      categoria: formDetalhe.categoria.trim() || "Outros",
+      descricao: formDetalhe.descricao.trim(),
+      valor: parseNumero(formDetalhe.valor),
+    };
+    const { error } = await supabase.from("despesas").update(payload).eq("id", despesaSelecionada.id);
+    setSalvandoDetalhe(false);
+    if (error) { setErro(error.message); return; }
+    const atualizada: Despesa = { id: despesaSelecionada.id, ...payload };
+    setDespesas((prev) => prev.map((d) => d.id === despesaSelecionada.id ? atualizada : d));
+    setDespesaSelecionada(atualizada);
+    setEditandoDetalhe(false);
+    setMensagem("Despesa atualizada.");
+  }
+
+  async function handleExcluirDetalheDespesa() {
+    if (!despesaSelecionada) return;
+    await handleExcluirDespesa(despesaSelecionada.id);
+    fecharDetalheDespesa();
+  }
+
   if (carregando) return <EstadoCarregando texto="Carregando indicadores..." />;
 
   // ─── Financial calculations ───
-  const receitaBruta = vendas.reduce((s, v) => s + v.valorUnitario * v.quantidade - v.desconto, 0);
+  // Receita bruta: valor de tabela × quantidade, sem nenhuma dedução.
+  const receitaBruta = vendas.reduce((s, v) => s + totalBrutoVenda(v), 0);
+  const descontosConcedidos = vendas.reduce((s, v) => s + v.desconto, 0);
   const taxasMarketplace = vendas.reduce((s, v) => s + v.taxaMarketplace, 0);
+  // Receita líquida: o que de fato entra no caixa após descontos e taxas de marketplace.
+  const receitaLiquida = receitaBruta - descontosConcedidos - taxasMarketplace;
 
   // Average fabrication unit cost per product
   const custoUnitFabMap: Record<string, number> = {};
@@ -423,9 +500,12 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
   );
 
   const totalDespesas = despesas.reduce((s, d) => s + d.valor, 0);
-  const lucroBruto = receitaBruta - taxasMarketplace;
-  const lucroLiquido = lucroBruto - custoFabricacaoVendidos - totalDespesas;
-  const margem = receitaBruta > 0 ? (lucroLiquido / receitaBruta) * 100 : 0;
+  // Lucro bruto (contábil): receita líquida menos o custo do produto vendido (COGS).
+  const lucroBruto = receitaLiquida - custoFabricacaoVendidos;
+  // Lucro líquido: lucro bruto menos despesas operacionais (frete, marketing, salários etc.).
+  const lucroLiquido = lucroBruto - totalDespesas;
+  const margemBruta = receitaLiquida > 0 ? (lucroBruto / receitaLiquida) * 100 : 0;
+  const margemLiquida = receitaLiquida > 0 ? (lucroLiquido / receitaLiquida) * 100 : 0;
 
   // ─── Stock calculations (fabrication-based unit cost) ───
   const estoqueMovimentos = produtos.map((p) => {
@@ -447,7 +527,7 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
     name: mes.label,
     Receita: vendas
       .filter((v) => v.data.startsWith(mes.prefixo))
-      .reduce((s, v) => s + v.valorUnitario * v.quantidade - v.desconto, 0),
+      .reduce((s, v) => s + totalLiquidoVenda(v), 0),
     Despesas:
       despesas
         .filter((d) => d.data.startsWith(mes.prefixo))
@@ -458,11 +538,11 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
   }));
   const vendasPorMarketplace = MARKETPLACES.map((mp) => ({
     name: mp,
-    value: vendas.filter((v) => v.marketplace === mp).reduce((s, v) => s + v.valorUnitario * v.quantidade - v.desconto, 0),
+    value: vendas.filter((v) => v.marketplace === mp).reduce((s, v) => s + totalLiquidoVenda(v), 0),
   })).filter((x) => x.value > 0);
   const receitaPorProduto = produtos.map((p) => ({
     name: p.nome,
-    value: vendas.filter((v) => v.produtoId === p.id).reduce((s, v) => s + v.valorUnitario * v.quantidade - v.desconto, 0),
+    value: vendas.filter((v) => v.produtoId === p.id).reduce((s, v) => s + totalLiquidoVenda(v), 0),
   })).filter((x) => x.value > 0);
   const despesasPorCategoria = [
     ...CATEGORIAS_DESPESA.map((cat) => ({
@@ -506,15 +586,21 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
       <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
         <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
           <KpiCard titulo="Receita bruta" valor={formatarMoeda(receitaBruta)} />
-          <KpiCard titulo="Lucro bruto" valor={formatarMoeda(lucroBruto)} destaque />
+          <KpiCard titulo="Receita líquida" valor={formatarMoeda(receitaLiquida)} />
+          <KpiCard titulo="Lucro bruto" valor={formatarMoeda(lucroBruto)} destaque={lucroBruto >= 0} alerta={lucroBruto < 0} />
           <KpiCard titulo="Lucro líquido" valor={formatarMoeda(lucroLiquido)} destaque={lucroLiquido >= 0} alerta={lucroLiquido < 0} />
-          <KpiCard titulo="Margem líquida" valor={`${margem.toFixed(1)}%`} destaque={margem >= 0} alerta={margem < 0} />
         </div>
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <KpiCard titulo="Taxas marketplace" valor={formatarMoeda(taxasMarketplace)} alerta />
-          <KpiCard titulo="Custo fab. vendidos" valor={formatarMoeda(custoFabricacaoVendidos)} alerta />
-          <KpiCard titulo="Outras despesas" valor={formatarMoeda(totalDespesas)} alerta />
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+          <KpiCard titulo="Descontos concedidos" valor={formatarMoeda(descontosConcedidos)} alerta={descontosConcedidos > 0} />
+          <KpiCard titulo="Taxas marketplace" valor={formatarMoeda(taxasMarketplace)} alerta={taxasMarketplace > 0} />
+          <KpiCard titulo="Custo de fabricação (COGS)" valor={formatarMoeda(custoFabricacaoVendidos)} alerta={custoFabricacaoVendidos > 0} />
+          <KpiCard titulo="Despesas operacionais" valor={formatarMoeda(totalDespesas)} alerta={totalDespesas > 0} />
+          <KpiCard titulo="Margem bruta" valor={`${margemBruta.toFixed(1)}%`} destaque={margemBruta >= 0} alerta={margemBruta < 0} />
+          <KpiCard titulo="Margem líquida" valor={`${margemLiquida.toFixed(1)}%`} destaque={margemLiquida >= 0} alerta={margemLiquida < 0} />
         </div>
+        <p className="mt-4 text-xs leading-5 text-[#78909C]">
+          Receita líquida = bruta − descontos − taxas de marketplace. Lucro bruto = receita líquida − custo de fabricação dos itens vendidos. Lucro líquido = lucro bruto − despesas operacionais. Margem calculada sobre a receita líquida.
+        </p>
       </div>
 
       {/* ── Indicadores de Estoque ── */}
@@ -546,7 +632,7 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
           <p className="text-sm font-semibold text-[#90A4AE]">Últimos 6 meses</p>
-          <h3 className="mt-1 text-lg font-bold">Receita — Tempo</h3>
+          <h3 className="mt-1 text-lg font-bold">Receita líquida — Tempo</h3>
           <div className="mt-4 h-56">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={evolucaoMensal}>
@@ -561,7 +647,7 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
         </div>
         <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
           <p className="text-sm font-semibold text-[#90A4AE]">Canais de venda</p>
-          <h3 className="mt-1 text-lg font-bold">Receita por marketplace</h3>
+          <h3 className="mt-1 text-lg font-bold">Receita líquida por marketplace</h3>
           {vendasPorMarketplace.length > 0 ? (
             <div className="mt-4 h-56">
               <ResponsiveContainer width="100%" height="100%">
@@ -580,7 +666,7 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
         </div>
         <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
           <p className="text-sm font-semibold text-[#90A4AE]">Produtos</p>
-          <h3 className="mt-1 text-lg font-bold">Receita por produto</h3>
+          <h3 className="mt-1 text-lg font-bold">Receita líquida por produto</h3>
           {receitaPorProduto.length > 0 ? (
             <div className="mt-4 h-56">
               <ResponsiveContainer width="100%" height="100%">
@@ -747,13 +833,17 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
                     </thead>
                     <tbody>
                       {despesasFiltradas.map((d) => (
-                        <tr key={d.id} className="border-t border-[#2a2a2a]">
+                        <tr
+                          key={d.id}
+                          onClick={() => abrirDetalheDespesa(d)}
+                          className="cursor-pointer border-t border-[#2a2a2a] transition hover:bg-[#2a2a2a]"
+                        >
                           <Td>{formatarData(d.data)}</Td>
                           <Td><span className="rounded-full bg-[#CFD8DC] px-2 py-0.5 text-xs font-semibold text-[#546E7A]">{d.categoria}</span></Td>
                           <Td>{d.descricao}</Td>
                           <Td className="font-semibold text-red-600">{formatarMoeda(d.valor)}</Td>
                           <Td>
-                            <button type="button" onClick={() => handleExcluirDespesa(d.id)}
+                            <button type="button" onClick={(e) => { e.stopPropagation(); handleExcluirDespesa(d.id); }}
                               className="inline-flex h-8 items-center gap-1 rounded-xl border border-red-900/50 bg-red-900/10 px-2 text-xs font-semibold text-red-400 transition hover:bg-red-900/30">
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
@@ -771,6 +861,40 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
         </div>
       </div>
 
+      {despesaSelecionada && (
+        <Modal
+          titulo={editandoDetalhe ? "Editar despesa" : despesaSelecionada.descricao}
+          subtitulo="Despesas"
+          onClose={fecharDetalheDespesa}
+        >
+          <FeedbackBloco mensagem="" erro={erro} />
+          {editandoDetalhe ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <CampoCadastro label="Data" type="date" value={formDetalhe.data} onChange={(v) => setFormDetalhe((f) => ({ ...f, data: v }))} required />
+              <SelectCadastro label="Categoria" value={formDetalhe.categoria} onChange={(v) => setFormDetalhe((f) => ({ ...f, categoria: v }))} options={CATEGORIAS_DESPESA} placeholder="Selecione..." />
+              <div className="sm:col-span-2">
+                <CampoCadastro label="Descrição" value={formDetalhe.descricao} onChange={(v) => setFormDetalhe((f) => ({ ...f, descricao: v }))} required />
+              </div>
+              <CampoCadastro label="Valor" value={formDetalhe.valor} onChange={(v) => setFormDetalhe((f) => ({ ...f, valor: v }))} required />
+            </div>
+          ) : (
+            <div>
+              <LinhaDetalhe label="Data" valor={formatarData(despesaSelecionada.data)} />
+              <LinhaDetalhe label="Categoria" valor={despesaSelecionada.categoria} />
+              <LinhaDetalhe label="Descrição" valor={despesaSelecionada.descricao} />
+              <LinhaDetalhe label="Valor" valor={formatarMoeda(despesaSelecionada.valor)} alerta />
+            </div>
+          )}
+          <ModalAcoes
+            editando={editandoDetalhe}
+            salvando={salvandoDetalhe}
+            onEditar={() => setEditandoDetalhe(true)}
+            onSalvar={handleSalvarDetalheDespesa}
+            onCancelar={() => setEditandoDetalhe(false)}
+            onExcluir={handleExcluirDetalheDespesa}
+          />
+        </Modal>
+      )}
     </div>
   );
 }
@@ -791,6 +915,20 @@ function VendasModulo({
   const [termoBusca, setTermoBusca] = useState("");
   const [mensagem, setMensagem] = useState("");
   const [erro, setErro] = useState("");
+
+  const [vendaSelecionada, setVendaSelecionada] = useState<Venda | null>(null);
+  const [editandoDetalhe, setEditandoDetalhe] = useState(false);
+  const [salvandoDetalhe, setSalvandoDetalhe] = useState(false);
+  const [formDetalhe, setFormDetalhe] = useState({
+    data: "",
+    marketplace: "" as Marketplace | "",
+    produtoId: "",
+    quantidade: "",
+    valorUnitario: "",
+    taxaMarketplace: "",
+    desconto: "",
+    observacao: "",
+  });
 
   const [form, setForm] = useState({
     data: dataHoje,
@@ -934,6 +1072,94 @@ function VendasModulo({
     setMensagem("Venda removida.");
   }
 
+  function abrirDetalhe(venda: Venda) {
+    setVendaSelecionada(venda);
+    setEditandoDetalhe(false);
+    setFormDetalhe({
+      data: venda.data,
+      marketplace: venda.marketplace,
+      produtoId: venda.produtoId,
+      quantidade: String(venda.quantidade),
+      valorUnitario: String(venda.valorUnitario).replace(".", ","),
+      taxaMarketplace: String(venda.taxaMarketplace).replace(".", ","),
+      desconto: String(venda.desconto).replace(".", ","),
+      observacao: venda.observacao,
+    });
+  }
+
+  function fecharDetalhe() {
+    setVendaSelecionada(null);
+    setEditandoDetalhe(false);
+  }
+
+  async function handleSalvarDetalhe() {
+    if (!vendaSelecionada) return;
+    if (!formDetalhe.data || !formDetalhe.marketplace || !formDetalhe.produtoId) {
+      setErro("Preencha data, marketplace e produto.");
+      return;
+    }
+    if (parseNumero(formDetalhe.quantidade) <= 0 || parseNumero(formDetalhe.valorUnitario) <= 0) {
+      setErro("Quantidade e valor unitário devem ser maiores que zero.");
+      return;
+    }
+
+    setSalvandoDetalhe(true);
+    setErro("");
+    const supabase = createClient();
+    const produtoNovo = produtos.find((p) => p.id === formDetalhe.produtoId);
+    const payload = {
+      data: formDetalhe.data,
+      marketplace: formDetalhe.marketplace,
+      produto_id: formDetalhe.produtoId,
+      produto_nome: produtoNovo?.nome ?? vendaSelecionada.produtoNome,
+      quantidade: parseNumero(formDetalhe.quantidade),
+      valor_unitario: parseNumero(formDetalhe.valorUnitario),
+      taxa_marketplace: parseNumero(formDetalhe.taxaMarketplace),
+      desconto: parseNumero(formDetalhe.desconto),
+      observacao: formDetalhe.observacao.trim(),
+    };
+
+    const { error } = await supabase.from("vendas").update(payload).eq("id", vendaSelecionada.id);
+    setSalvandoDetalhe(false);
+    if (error) { setErro(error.message); return; }
+
+    // Reconcile stock: undo old sale's effect, apply new sale's effect
+    const qtdAntiga = vendaSelecionada.quantidade;
+    const qtdNova = payload.quantidade;
+    if (vendaSelecionada.produtoId === payload.produto_id) {
+      const delta = qtdNova - qtdAntiga;
+      if (delta !== 0 && produtoNovo) {
+        await supabase.from("produtos").update({
+          estoque_atual: Math.max(0, produtoNovo.estoqueAtual - delta),
+        }).eq("id", payload.produto_id);
+      }
+    } else {
+      const produtoAntigo = produtos.find((p) => p.id === vendaSelecionada.produtoId);
+      if (produtoAntigo) {
+        await supabase.from("produtos").update({
+          estoque_atual: produtoAntigo.estoqueAtual + qtdAntiga,
+        }).eq("id", vendaSelecionada.produtoId);
+      }
+      if (produtoNovo) {
+        await supabase.from("produtos").update({
+          estoque_atual: Math.max(0, produtoNovo.estoqueAtual - qtdNova),
+        }).eq("id", payload.produto_id);
+      }
+    }
+
+    const vendaAtualizada: Venda = { ...vendaSelecionada, ...mapVenda({ id: vendaSelecionada.id, ...payload }) };
+    setVendas((prev) => prev.map((v) => v.id === vendaSelecionada.id ? vendaAtualizada : v));
+    setVendaSelecionada(vendaAtualizada);
+    setEditandoDetalhe(false);
+    setMensagem("Venda atualizada.");
+  }
+
+  async function handleExcluirDetalhe() {
+    if (!vendaSelecionada) return;
+    await handleExcluir(vendaSelecionada.id);
+    fecharDetalhe();
+  }
+
   const vendasFiltradas = vendas.filter((v) => {
     const q = termoBusca.toLowerCase();
     return (
@@ -944,10 +1170,8 @@ function VendasModulo({
     );
   });
 
-  const totalReceita = vendas.reduce(
-    (s, v) => s + v.valorUnitario * v.quantidade - v.desconto,
-    0
-  );
+  const totalBruto = vendas.reduce((s, v) => s + totalBrutoVenda(v), 0);
+  const totalLiquido = vendas.reduce((s, v) => s + totalLiquidoVenda(v), 0);
   const totalItens = vendas.reduce((s, v) => s + v.quantidade, 0);
 
   return (
@@ -958,10 +1182,11 @@ function VendasModulo({
         descricao="Cadastre vendas por marketplace e acompanhe o faturamento consolidado."
       />
 
-      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <KpiCard titulo="Vendas registradas" valor={String(vendas.length)} />
         <KpiCard titulo="Itens vendidos" valor={String(totalItens)} />
-        <KpiCard titulo="Receita total" valor={formatarMoeda(totalReceita)} destaque />
+        <KpiCard titulo="Receita bruta" valor={formatarMoeda(totalBruto)} />
+        <KpiCard titulo="Receita líquida" valor={formatarMoeda(totalLiquido)} destaque />
       </div>
 
       <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
@@ -1053,6 +1278,7 @@ function VendasModulo({
             <div>
               <p className="text-sm font-semibold text-[#90A4AE]">Histórico</p>
               <h3 className="mt-1 text-xl font-bold">Vendas registradas</h3>
+              <p className="mt-0.5 text-xs text-[#78909C]">Clique em uma venda para ver detalhes e editar.</p>
             </div>
             <div className="relative sm:min-w-64">
               <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#90A4AE]" />
@@ -1076,39 +1302,27 @@ function VendasModulo({
                       <Th>Marketplace</Th>
                       <Th>Produto</Th>
                       <Th>Qtd</Th>
-                      <Th>Total</Th>
-                      <Th>Ações</Th>
+                      <Th>Bruto</Th>
+                      <Th>Líquido</Th>
                     </tr>
                   </thead>
                   <tbody>
-                    {vendasFiltradas.map((v) => {
-                      const total =
-                        v.valorUnitario * v.quantidade - v.desconto;
-                      return (
-                        <tr
-                          key={v.id}
-                          className="border-t border-[#2a2a2a]"
-                        >
-                          <Td>{formatarData(v.data)}</Td>
-                          <Td>
-                            <MarketplaceBadge marketplace={v.marketplace} />
-                          </Td>
-                          <Td className="font-semibold">{v.produtoNome || "-"}</Td>
-                          <Td>{v.quantidade}</Td>
-                          <Td>{formatarMoeda(total)}</Td>
-                          <Td>
-                            <button
-                              type="button"
-                              onClick={() => handleExcluir(v.id)}
-                              className="inline-flex h-8 items-center gap-1 rounded-xl border border-red-900/50 bg-red-900/10 px-3 text-xs font-semibold text-red-400 transition hover:bg-red-900/30"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                              Excluir
-                            </button>
-                          </Td>
-                        </tr>
-                      );
-                    })}
+                    {vendasFiltradas.map((v) => (
+                      <tr
+                        key={v.id}
+                        onClick={() => abrirDetalhe(v)}
+                        className="cursor-pointer border-t border-[#2a2a2a] transition hover:bg-[#2a2a2a]"
+                      >
+                        <Td>{formatarData(v.data)}</Td>
+                        <Td>
+                          <MarketplaceBadge marketplace={v.marketplace} />
+                        </Td>
+                        <Td className="font-semibold">{v.produtoNome || "-"}</Td>
+                        <Td>{v.quantidade}</Td>
+                        <Td>{formatarMoeda(totalBrutoVenda(v))}</Td>
+                        <Td className="font-semibold text-[#90A4AE]">{formatarMoeda(totalLiquidoVenda(v))}</Td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -1118,6 +1332,64 @@ function VendasModulo({
           </div>
         </div>
       </div>
+
+      {vendaSelecionada && (
+        <Modal
+          titulo={editandoDetalhe ? "Editar venda" : vendaSelecionada.produtoNome || "Detalhe da venda"}
+          subtitulo="Vendas"
+          onClose={fecharDetalhe}
+          largo={editandoDetalhe}
+        >
+          <FeedbackBloco mensagem="" erro={erro} />
+          {editandoDetalhe ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <CampoCadastro label="Data" type="date" value={formDetalhe.data} onChange={(v) => setFormDetalhe((f) => ({ ...f, data: v }))} required />
+              <SelectCadastro label="Marketplace" value={formDetalhe.marketplace} onChange={(v) => setFormDetalhe((f) => ({ ...f, marketplace: v as Marketplace }))} options={MARKETPLACES} placeholder="Selecione..." />
+              <div className="sm:col-span-2">
+                <label className="mb-1 block text-sm font-medium">Produto</label>
+                <select
+                  value={formDetalhe.produtoId}
+                  onChange={(e) => setFormDetalhe((f) => ({ ...f, produtoId: e.target.value }))}
+                  className="w-full rounded-2xl border border-[#333333] bg-[#141414] px-4 py-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+                >
+                  <option value="">Selecione um produto...</option>
+                  {produtos.map((p) => (
+                    <option key={p.id} value={p.id}>{p.codigo ? `[${p.codigo}] ` : ""}{p.nome}</option>
+                  ))}
+                </select>
+              </div>
+              <CampoCadastro label="Quantidade" value={formDetalhe.quantidade} onChange={(v) => setFormDetalhe((f) => ({ ...f, quantidade: v }))} required />
+              <CampoCadastro label="Valor unitário" value={formDetalhe.valorUnitario} onChange={(v) => setFormDetalhe((f) => ({ ...f, valorUnitario: v }))} required />
+              <CampoCadastro label="Taxa marketplace" value={formDetalhe.taxaMarketplace} onChange={(v) => setFormDetalhe((f) => ({ ...f, taxaMarketplace: v }))} />
+              <CampoCadastro label="Desconto" value={formDetalhe.desconto} onChange={(v) => setFormDetalhe((f) => ({ ...f, desconto: v }))} />
+              <div className="sm:col-span-2">
+                <CampoCadastro label="Observação" value={formDetalhe.observacao} onChange={(v) => setFormDetalhe((f) => ({ ...f, observacao: v }))} />
+              </div>
+            </div>
+          ) : (
+            <div>
+              <LinhaDetalhe label="Data" valor={formatarData(vendaSelecionada.data)} />
+              <LinhaDetalhe label="Marketplace" valor={<MarketplaceBadge marketplace={vendaSelecionada.marketplace} />} />
+              <LinhaDetalhe label="Produto" valor={vendaSelecionada.produtoNome || "-"} />
+              <LinhaDetalhe label="Quantidade" valor={vendaSelecionada.quantidade} />
+              <LinhaDetalhe label="Valor unitário" valor={formatarMoeda(vendaSelecionada.valorUnitario)} />
+              <LinhaDetalhe label="Subtotal bruto" valor={formatarMoeda(vendaSelecionada.valorUnitario * vendaSelecionada.quantidade)} />
+              <LinhaDetalhe label="Desconto" valor={`- ${formatarMoeda(vendaSelecionada.desconto)}`} alerta={vendaSelecionada.desconto > 0} />
+              <LinhaDetalhe label="Taxa marketplace" valor={`- ${formatarMoeda(vendaSelecionada.taxaMarketplace)}`} alerta={vendaSelecionada.taxaMarketplace > 0} />
+              <LinhaDetalhe label="Valor líquido recebido" valor={formatarMoeda(totalLiquidoVenda(vendaSelecionada))} destaque />
+              {vendaSelecionada.observacao && <LinhaDetalhe label="Observação" valor={vendaSelecionada.observacao} />}
+            </div>
+          )}
+          <ModalAcoes
+            editando={editandoDetalhe}
+            salvando={salvandoDetalhe}
+            onEditar={() => setEditandoDetalhe(true)}
+            onSalvar={handleSalvarDetalhe}
+            onCancelar={() => setEditandoDetalhe(false)}
+            onExcluir={handleExcluirDetalhe}
+          />
+        </Modal>
+      )}
     </section>
   );
 }
@@ -1232,7 +1504,15 @@ function ProdutosSubModulo({
   const [mensagem, setMensagem] = useState("");
   const [erro, setErro] = useState("");
 
-  const [form, setForm] = useState(() => ({ codigo: proximoCodigo(produtos, "EK-"), nome: "", categoria: "", ativo: true }));
+  const [form, setForm] = useState(() => ({
+    codigo: proximoCodigo(produtos, "EK-"),
+    nome: "",
+    categoria: "",
+    custo: "",
+    precoVenda: "",
+    estoqueMinimo: "",
+    ativo: true,
+  }));
   const [compRascunho, setCompRascunho] = useState<CompRascunho[]>([]);
 
   useEffect(() => {
@@ -1240,10 +1520,15 @@ function ProdutosSubModulo({
       setForm((f) => ({ ...f, codigo: proximoCodigo(produtos, "EK-") }));
     }
   }, [produtos, editandoId]);
+
   const [compEdicao, setCompEdicao] = useState<ComponenteProduto[]>([]);
   const [carregandoComp, setCarregandoComp] = useState(false);
   const [salvandoComp, setSalvandoComp] = useState(false);
   const [formComp, setFormComp] = useState({ materiaPrimaId: "", nomePeca: "", quantidade: "1", linkCompra: "" });
+
+  const [produtoSelecionado, setProdutoSelecionado] = useState<Produto | null>(null);
+  const [componentesDetalhe, setComponentesDetalhe] = useState<ComponenteProduto[]>([]);
+  const [carregandoDetalhe, setCarregandoDetalhe] = useState(false);
 
   function selecionarMP(mpId: string) {
     const mp = materiasPrimas.find((m) => m.id === mpId);
@@ -1290,13 +1575,29 @@ function ProdutosSubModulo({
   }
 
   function limparForm() {
-    setForm({ codigo: proximoCodigo(produtos, "EK-"), nome: "", categoria: "", ativo: true });
+    setForm({
+      codigo: proximoCodigo(produtos, "EK-"),
+      nome: "",
+      categoria: "",
+      custo: "",
+      precoVenda: "",
+      estoqueMinimo: "",
+      ativo: true,
+    });
     setCompRascunho([]); setCompEdicao([]);
     setEditandoId(null); setMensagem(""); setErro("");
   }
 
   async function iniciarEdicao(produto: Produto) {
-    setForm({ codigo: produto.codigo, nome: produto.nome, categoria: produto.categoria, ativo: produto.ativo });
+    setForm({
+      codigo: produto.codigo,
+      nome: produto.nome,
+      categoria: produto.categoria,
+      custo: produto.custo ? String(produto.custo).replace(".", ",") : "",
+      precoVenda: produto.precoVenda ? String(produto.precoVenda).replace(".", ",") : "",
+      estoqueMinimo: produto.estoqueMinimo ? String(produto.estoqueMinimo) : "",
+      ativo: produto.ativo,
+    });
     setCompRascunho([]);
     setEditandoId(produto.id);
     setCarregandoComp(true);
@@ -1305,6 +1606,34 @@ function ProdutosSubModulo({
     setCompEdicao((data ?? []).map(mapComponente));
     setCarregandoComp(false);
     setFormComp({ materiaPrimaId: "", nomePeca: "", quantidade: "1", linkCompra: "" });
+  }
+
+  async function abrirDetalhe(produto: Produto) {
+    setProdutoSelecionado(produto);
+    setCarregandoDetalhe(true);
+    const supabase = createClient();
+    const { data } = await supabase.from("componentes_produto").select("*").eq("produto_id", produto.id).order("created_at");
+    setComponentesDetalhe((data ?? []).map(mapComponente));
+    setCarregandoDetalhe(false);
+  }
+
+  function fecharDetalhe() {
+    setProdutoSelecionado(null);
+    setComponentesDetalhe([]);
+  }
+
+  function handleEditarDoDetalhe() {
+    if (!produtoSelecionado) return;
+    const produto = produtoSelecionado;
+    fecharDetalhe();
+    iniciarEdicao(produto);
+  }
+
+  async function handleExcluirDoDetalhe() {
+    if (!produtoSelecionado) return;
+    const id = produtoSelecionado.id;
+    fecharDetalhe();
+    await handleExcluir(id);
   }
 
   async function handleSalvar(e: React.FormEvent) {
@@ -1318,12 +1647,30 @@ function ProdutosSubModulo({
     }
     setSalvando(true);
     const supabase = createClient();
-    const payload = { criado_por: usuarioId, codigo: form.codigo.trim(), nome: form.nome.trim(), categoria: form.categoria.trim(), ativo: form.ativo };
+    const payload = {
+      criado_por: usuarioId,
+      codigo: form.codigo.trim(),
+      nome: form.nome.trim(),
+      categoria: form.categoria.trim(),
+      custo: parseNumero(form.custo),
+      preco_venda: parseNumero(form.precoVenda),
+      estoque_minimo: parseNumero(form.estoqueMinimo),
+      ativo: form.ativo,
+    };
     if (editandoId) {
       const { error } = await supabase.from("produtos").update(payload).eq("id", editandoId);
       setSalvando(false);
       if (error) { setErro(error.message); return; }
-      setProdutos((prev) => prev.map((p) => p.id === editandoId ? { ...p, ...{ codigo: payload.codigo, nome: payload.nome, categoria: payload.categoria, ativo: payload.ativo } } : p));
+      setProdutos((prev) => prev.map((p) => p.id === editandoId ? {
+        ...p,
+        codigo: payload.codigo,
+        nome: payload.nome,
+        categoria: payload.categoria,
+        custo: payload.custo,
+        precoVenda: payload.preco_venda,
+        estoqueMinimo: payload.estoque_minimo,
+        ativo: payload.ativo,
+      } : p));
       setMensagem("Produto atualizado."); limparForm();
     } else {
       const { data, error } = await supabase.from("produtos").insert(payload).select().single();
@@ -1373,6 +1720,9 @@ function ProdutosSubModulo({
           <div className="sm:col-span-2">
             <CampoCadastro label="Categoria" value={form.categoria} onChange={(v) => setForm((f) => ({ ...f, categoria: v }))} placeholder="Ex: Patins, Estrutura..." />
           </div>
+          <CampoCadastro label="Custo" value={form.custo} onChange={(v) => setForm((f) => ({ ...f, custo: v }))} placeholder="0,00" />
+          <CampoCadastro label="Preço de venda sugerido" value={form.precoVenda} onChange={(v) => setForm((f) => ({ ...f, precoVenda: v }))} placeholder="0,00" />
+          <CampoCadastro label="Estoque mínimo" value={form.estoqueMinimo} onChange={(v) => setForm((f) => ({ ...f, estoqueMinimo: v }))} placeholder="0" />
           <label className="flex min-h-11 items-center gap-3 rounded-2xl border border-[#333333] bg-[#212121] px-4 py-3 text-sm sm:col-span-2">
             <input type="checkbox" checked={form.ativo} onChange={(e) => setForm((f) => ({ ...f, ativo: e.target.checked }))}
               className="h-4 w-4 rounded border-[#333333] accent-[#546E7A]" />
@@ -1493,23 +1843,28 @@ function ProdutosSubModulo({
             <div className="max-h-[600px] overflow-auto">
               <table className="min-w-[420px] w-full bg-[#212121] text-left text-sm">
                 <thead className="sticky top-0 bg-[#181818] text-[#90A4AE]">
-                  <tr><Th>Código</Th><Th>Nome</Th><Th>Categoria</Th><Th>Ativo</Th><Th>Ações</Th></tr>
+                  <tr><Th>Código</Th><Th>Nome</Th><Th>Categoria</Th><Th>Preço venda</Th><Th>Ativo</Th><Th>Ações</Th></tr>
                 </thead>
                 <tbody>
                   {produtosFiltrados.map((p) => (
-                    <tr key={p.id} className={`border-t border-[#2a2a2a] ${editandoId === p.id ? "bg-[#CFD8DC]" : ""}`}>
+                    <tr
+                      key={p.id}
+                      onClick={() => abrirDetalhe(p)}
+                      className={`cursor-pointer border-t border-[#2a2a2a] transition hover:bg-[#2a2a2a] ${editandoId === p.id ? "bg-[#CFD8DC]" : ""}`}
+                    >
                       <Td className="text-xs text-[#78909C]">{p.codigo || "-"}</Td>
                       <Td className="font-semibold">{p.nome}</Td>
                       <Td>{p.categoria || "-"}</Td>
+                      <Td>{p.precoVenda > 0 ? formatarMoeda(p.precoVenda) : <span className="text-[#90A4AE]">—</span>}</Td>
                       <Td><span className={`text-xs font-semibold ${p.ativo ? "text-emerald-400" : "text-[#90A4AE]"}`}>{p.ativo ? "Sim" : "Não"}</span></Td>
                       <Td>
                         <div className="flex gap-1">
-                          <button type="button" onClick={() => iniciarEdicao(p)}
+                          <button type="button" onClick={(e) => { e.stopPropagation(); iniciarEdicao(p); }}
                             className="inline-flex h-8 items-center gap-1 rounded-xl border border-[#333333] bg-[#212121] px-2 text-xs font-semibold text-[#546E7A] transition hover:bg-[#2a2a2a]">
                             <Pencil className="h-3.5 w-3.5" /> Editar
                           </button>
                           {isAdmin && (
-                            <button type="button" onClick={() => handleExcluir(p.id)}
+                            <button type="button" onClick={(e) => { e.stopPropagation(); handleExcluir(p.id); }}
                               className="inline-flex h-8 items-center gap-1 rounded-xl border border-red-900/50 bg-red-900/10 px-2 text-xs font-semibold text-red-400 transition hover:bg-red-900/30">
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
@@ -1526,6 +1881,74 @@ function ProdutosSubModulo({
           )}
         </div>
       </div>
+
+      {produtoSelecionado && (
+        <Modal
+          titulo={produtoSelecionado.nome}
+          subtitulo="Produtos"
+          onClose={fecharDetalhe}
+        >
+          <div>
+            <LinhaDetalhe label="Código" valor={produtoSelecionado.codigo || "-"} />
+            <LinhaDetalhe label="Categoria" valor={produtoSelecionado.categoria || "-"} />
+            <LinhaDetalhe label="Custo" valor={produtoSelecionado.custo > 0 ? formatarMoeda(produtoSelecionado.custo) : "—"} />
+            <LinhaDetalhe label="Preço de venda" valor={produtoSelecionado.precoVenda > 0 ? formatarMoeda(produtoSelecionado.precoVenda) : "—"} destaque />
+            <LinhaDetalhe label="Estoque mínimo" valor={produtoSelecionado.estoqueMinimo} />
+            <LinhaDetalhe
+              label="Ativo"
+              valor={produtoSelecionado.ativo ? "Sim" : "Não"}
+              alerta={!produtoSelecionado.ativo}
+            />
+
+            <p className="mb-2 mt-5 text-sm font-semibold text-[#90A4AE]">Matérias-primas que compõem o produto</p>
+            {carregandoDetalhe ? (
+              <p className="py-3 text-xs text-[#78909C]">Carregando componentes...</p>
+            ) : componentesDetalhe.length > 0 ? (
+              <div className="overflow-auto rounded-xl border border-[#2a2a2a]">
+                <table className="min-w-[420px] w-full text-left text-xs">
+                  <thead className="bg-[#181818] text-[#90A4AE]">
+                    <tr><Th>Matéria-prima</Th><Th>Qtd</Th><Th>Link</Th></tr>
+                  </thead>
+                  <tbody>
+                    {componentesDetalhe.map((c) => (
+                      <tr key={c.id} className="border-t border-[#2a2a2a]">
+                        <Td className="font-semibold">{c.nomePeca}</Td>
+                        <Td>{c.quantidade}</Td>
+                        <Td>
+                          {c.linkCompra ? (
+                            <a href={c.linkCompra} target="_blank" rel="noopener noreferrer" className="text-[#90A4AE] underline">Ver</a>
+                          ) : <span className="text-[#90A4AE]">—</span>}
+                        </Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="py-3 text-xs text-[#78909C]">Nenhuma matéria-prima cadastrada para este produto.</p>
+            )}
+          </div>
+
+          <div className="mt-6 flex flex-wrap gap-3 border-t border-[#2a2a2a] pt-5">
+            <button
+              type="button"
+              onClick={handleEditarDoDetalhe}
+              className="inline-flex h-11 items-center gap-2 rounded-2xl bg-[#546E7A] px-4 text-sm font-semibold text-white transition hover:bg-[#455A64]"
+            >
+              <Pencil className="h-4 w-4" /> Editar
+            </button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={handleExcluirDoDetalhe}
+                className="inline-flex h-11 items-center gap-2 rounded-2xl border border-red-900/50 bg-red-900/10 px-4 text-sm font-semibold text-red-400 transition hover:bg-red-900/30"
+              >
+                <Trash2 className="h-4 w-4" /> Excluir
+              </button>
+            )}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -2185,6 +2608,16 @@ function ComprasModulo({
     observacao: "",
   });
 
+  const [pedidoSelecionado, setPedidoSelecionado] = useState<PedidoCompra | null>(null);
+  const [editandoDetalhe, setEditandoDetalhe] = useState(false);
+  const [salvandoDetalhe, setSalvandoDetalhe] = useState(false);
+  const [formDetalhe, setFormDetalhe] = useState({
+    fornecedorId: "",
+    data: "",
+    status: "pendente" as PedidoCompra["status"],
+    valorTotal: "",
+    observacao: "",
+  });
 
   useEffect(() => {
     let ativo = true;
@@ -2247,6 +2680,74 @@ function ComprasModulo({
     if (error) { setErro(error.message); return; }
     setPedidos((prev) => prev.map((p) => (p.id === id ? { ...p, status } : p)));
     setMensagem("Status atualizado.");
+  }
+
+  async function handleExcluirPedido(id: string) {
+    if (!confirm("Excluir este pedido de compra?")) return;
+    const supabase = createClient();
+    const { error } = await supabase.from("pedidos_compra").delete().eq("id", id);
+    if (error) { setErro(error.message); return; }
+    setPedidos((prev) => prev.filter((p) => p.id !== id));
+    setMensagem("Pedido removido.");
+  }
+
+  function abrirDetalhePedido(pedido: PedidoCompra) {
+    setPedidoSelecionado(pedido);
+    setEditandoDetalhe(false);
+    setFormDetalhe({
+      fornecedorId: pedido.fornecedorId,
+      data: pedido.data,
+      status: pedido.status,
+      valorTotal: String(pedido.valorTotal).replace(".", ","),
+      observacao: pedido.observacao,
+    });
+  }
+
+  function fecharDetalhePedido() {
+    setPedidoSelecionado(null);
+    setEditandoDetalhe(false);
+  }
+
+  async function handleSalvarDetalhePedido() {
+    if (!pedidoSelecionado) return;
+    if (!formDetalhe.data || !formDetalhe.fornecedorId) {
+      setErro("Preencha data e fornecedor.");
+      return;
+    }
+    setSalvandoDetalhe(true);
+    setErro("");
+    const supabase = createClient();
+    const fornecedor = fornecedores.find((f) => f.id === formDetalhe.fornecedorId);
+    const payload = {
+      fornecedor_id: formDetalhe.fornecedorId,
+      data: formDetalhe.data,
+      status: formDetalhe.status,
+      valor_total: parseNumero(formDetalhe.valorTotal),
+      observacao: formDetalhe.observacao.trim(),
+    };
+    const { error } = await supabase.from("pedidos_compra").update(payload).eq("id", pedidoSelecionado.id);
+    setSalvandoDetalhe(false);
+    if (error) { setErro(error.message); return; }
+
+    const pedidoAtualizado: PedidoCompra = {
+      ...pedidoSelecionado,
+      fornecedorId: payload.fornecedor_id,
+      fornecedorNome: fornecedor?.nome ?? pedidoSelecionado.fornecedorNome,
+      data: payload.data,
+      status: payload.status,
+      valorTotal: payload.valor_total,
+      observacao: payload.observacao,
+    };
+    setPedidos((prev) => prev.map((p) => p.id === pedidoSelecionado.id ? pedidoAtualizado : p));
+    setPedidoSelecionado(pedidoAtualizado);
+    setEditandoDetalhe(false);
+    setMensagem("Pedido atualizado.");
+  }
+
+  async function handleExcluirDetalhePedido() {
+    if (!pedidoSelecionado) return;
+    await handleExcluirPedido(pedidoSelecionado.id);
+    fecharDetalhePedido();
   }
 
   const totalCompras = pedidos.reduce((s, p) => s + p.valorTotal, 0);
@@ -2344,13 +2845,18 @@ function ComprasModulo({
                   </thead>
                   <tbody>
                     {pedidos.map((p) => (
-                      <tr key={p.id} className="border-t border-[#2a2a2a]">
+                      <tr
+                        key={p.id}
+                        onClick={() => abrirDetalhePedido(p)}
+                        className="cursor-pointer border-t border-[#2a2a2a] transition hover:bg-[#2a2a2a]"
+                      >
                         <Td>{formatarData(p.data)}</Td>
                         <Td className="font-semibold">{p.fornecedorNome || "-"}</Td>
                         <Td>{formatarMoeda(p.valorTotal)}</Td>
                         <Td>
                           <select
                             value={p.status}
+                            onClick={(e) => e.stopPropagation()}
                             onChange={(e) => handleAtualizarStatusPedido(p.id, e.target.value as PedidoCompra["status"])}
                             className={`rounded-full px-3 py-1 text-xs font-semibold outline-none ${
                               p.status === "recebido"
@@ -2384,6 +2890,66 @@ function ComprasModulo({
           fornecedores={fornecedores}
         />
       )}
+
+      {pedidoSelecionado && (
+        <Modal
+          titulo={editandoDetalhe ? "Editar pedido de compra" : pedidoSelecionado.fornecedorNome || "Detalhe do pedido"}
+          subtitulo="Compras"
+          onClose={fecharDetalhePedido}
+        >
+          <FeedbackBloco mensagem="" erro={erro} />
+          {editandoDetalhe ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <label className="mb-1 block text-sm font-medium">Fornecedor</label>
+                <select
+                  value={formDetalhe.fornecedorId}
+                  onChange={(e) => setFormDetalhe((f) => ({ ...f, fornecedorId: e.target.value }))}
+                  className="w-full rounded-2xl border border-[#333333] bg-[#141414] px-4 py-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+                >
+                  <option value="">Selecione...</option>
+                  {fornecedores.map((f) => (
+                    <option key={f.id} value={f.id}>{f.nome}</option>
+                  ))}
+                </select>
+              </div>
+              <CampoCadastro label="Data" type="date" value={formDetalhe.data} onChange={(v) => setFormDetalhe((f) => ({ ...f, data: v }))} required />
+              <SelectCadastro
+                label="Status"
+                value={formDetalhe.status}
+                onChange={(v) => setFormDetalhe((f) => ({ ...f, status: v as PedidoCompra["status"] }))}
+                options={["pendente", "recebido", "cancelado"]}
+                placeholder=""
+              />
+              <CampoCadastro label="Valor total" value={formDetalhe.valorTotal} onChange={(v) => setFormDetalhe((f) => ({ ...f, valorTotal: v }))} />
+              <div className="sm:col-span-2">
+                <CampoCadastro label="Observação" value={formDetalhe.observacao} onChange={(v) => setFormDetalhe((f) => ({ ...f, observacao: v }))} />
+              </div>
+            </div>
+          ) : (
+            <div>
+              <LinhaDetalhe label="Fornecedor" valor={pedidoSelecionado.fornecedorNome || "-"} />
+              <LinhaDetalhe label="Data" valor={formatarData(pedidoSelecionado.data)} />
+              <LinhaDetalhe
+                label="Status"
+                valor={pedidoSelecionado.status === "recebido" ? "Recebido" : pedidoSelecionado.status === "cancelado" ? "Cancelado" : "Pendente"}
+                alerta={pedidoSelecionado.status === "cancelado"}
+                destaque={pedidoSelecionado.status === "recebido"}
+              />
+              <LinhaDetalhe label="Valor total" valor={formatarMoeda(pedidoSelecionado.valorTotal)} destaque />
+              {pedidoSelecionado.observacao && <LinhaDetalhe label="Observação" valor={pedidoSelecionado.observacao} />}
+            </div>
+          )}
+          <ModalAcoes
+            editando={editandoDetalhe}
+            salvando={salvandoDetalhe}
+            onEditar={() => setEditandoDetalhe(true)}
+            onSalvar={handleSalvarDetalhePedido}
+            onCancelar={() => setEditandoDetalhe(false)}
+            onExcluir={handleExcluirDetalhePedido}
+          />
+        </Modal>
+      )}
     </section>
   );
 }
@@ -2413,6 +2979,13 @@ function FabricacaoSubModulo({
   const [itens, setItens] = useState<ItemFabricacaoRascunho[]>([]);
   const [componentesCarregados, setComponentesCarregados] = useState(false);
   const [carregandoComp, setCarregandoComp] = useState(false);
+
+  const [pedidoSelecionado, setPedidoSelecionado] = useState<PedidoFabricacao | null>(null);
+  const [itensDetalhe, setItensDetalhe] = useState<ItemFabricacao[]>([]);
+  const [carregandoItensDetalhe, setCarregandoItensDetalhe] = useState(false);
+  const [editandoDetalhe, setEditandoDetalhe] = useState(false);
+  const [salvandoDetalhe, setSalvandoDetalhe] = useState(false);
+  const [formDetalhe, setFormDetalhe] = useState({ data: "", observacao: "" });
 
   useEffect(() => {
     let ativo = true;
@@ -2540,6 +3113,60 @@ function FabricacaoSubModulo({
     setMensagem("Pedido de fabricação registrado.");
   }
 
+  async function abrirDetalhePedido(pedido: PedidoFabricacao) {
+    setPedidoSelecionado(pedido);
+    setEditandoDetalhe(false);
+    setFormDetalhe({ data: pedido.data, observacao: pedido.observacao });
+    setCarregandoItensDetalhe(true);
+    const supabase = createClient();
+    const { data } = await supabase.from("itens_fabricacao").select("*").eq("pedido_id", pedido.id).order("created_at");
+    setItensDetalhe((data ?? []).map(mapItemFabricacao));
+    setCarregandoItensDetalhe(false);
+  }
+
+  function fecharDetalhePedido() {
+    setPedidoSelecionado(null);
+    setEditandoDetalhe(false);
+    setItensDetalhe([]);
+  }
+
+  async function handleSalvarDetalhePedido() {
+    if (!pedidoSelecionado) return;
+    if (!formDetalhe.data) { setErro("Informe a data."); return; }
+    setSalvandoDetalhe(true);
+    setErro("");
+    const supabase = createClient();
+    const payload = { data: formDetalhe.data, observacao: formDetalhe.observacao.trim() };
+    const { error } = await supabase.from("pedidos_fabricacao").update(payload).eq("id", pedidoSelecionado.id);
+    setSalvandoDetalhe(false);
+    if (error) { setErro(error.message); return; }
+    const atualizado: PedidoFabricacao = { ...pedidoSelecionado, ...payload };
+    setPedidos((prev) => prev.map((p) => p.id === pedidoSelecionado.id ? atualizado : p));
+    setPedidoSelecionado(atualizado);
+    setEditandoDetalhe(false);
+    setMensagem("Pedido de fabricação atualizado.");
+  }
+
+  async function handleExcluirDetalhePedido() {
+    if (!pedidoSelecionado) return;
+    if (!confirm("Excluir este pedido de fabricação? O estoque produzido será estornado.")) return;
+    const supabase = createClient();
+    const { error } = await supabase.from("pedidos_fabricacao").delete().eq("id", pedidoSelecionado.id);
+    if (error) { setErro(error.message); return; }
+    await supabase.from("itens_fabricacao").delete().eq("pedido_id", pedidoSelecionado.id);
+
+    const produtoFab = produtos.find((p) => p.id === pedidoSelecionado.produtoId);
+    if (produtoFab) {
+      const novoSaldo = Math.max(0, produtoFab.estoqueAtual - pedidoSelecionado.qtdFabricada);
+      await supabase.from("produtos").update({ estoque_atual: novoSaldo }).eq("id", pedidoSelecionado.produtoId);
+      setProdutos((prev) => prev.map((p) => p.id === pedidoSelecionado.produtoId ? { ...p, estoqueAtual: novoSaldo } : p));
+    }
+
+    setPedidos((prev) => prev.filter((p) => p.id !== pedidoSelecionado.id));
+    fecharDetalhePedido();
+    setMensagem("Pedido de fabricação removido.");
+  }
+
   if (carregando) return <EstadoCarregando texto="Carregando fabricação..." />;
 
   return (
@@ -2658,6 +3285,7 @@ function FabricacaoSubModulo({
       {/* Histórico */}
       <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
         <p className="text-sm font-semibold text-[#90A4AE]">Histórico de fabricação</p>
+        <p className="mt-0.5 text-xs text-[#78909C]">Clique em um pedido para ver os itens usados e editar.</p>
         <div className="mt-4 overflow-hidden rounded-3xl border border-[#333333]">
           {pedidos.length > 0 ? (
             <div className="max-h-72 overflow-auto">
@@ -2672,7 +3300,11 @@ function FabricacaoSubModulo({
                 </thead>
                 <tbody>
                   {pedidos.map((p) => (
-                    <tr key={p.id} className="border-t border-[#2a2a2a]">
+                    <tr
+                      key={p.id}
+                      onClick={() => abrirDetalhePedido(p)}
+                      className="cursor-pointer border-t border-[#2a2a2a] transition hover:bg-[#2a2a2a]"
+                    >
                       <Td>{formatarData(p.data)}</Td>
                       <Td className="font-semibold">{p.produtoNome}</Td>
                       <Td>{p.qtdFabricada}</Td>
@@ -2687,6 +3319,69 @@ function FabricacaoSubModulo({
           )}
         </div>
       </div>
+
+      {pedidoSelecionado && (
+        <Modal
+          titulo={editandoDetalhe ? "Editar pedido de fabricação" : pedidoSelecionado.produtoNome || "Detalhe da fabricação"}
+          subtitulo="Fabricação"
+          onClose={fecharDetalhePedido}
+          largo
+        >
+          <FeedbackBloco mensagem="" erro={erro} />
+          {editandoDetalhe ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <CampoCadastro label="Data" type="date" value={formDetalhe.data} onChange={(v) => setFormDetalhe((f) => ({ ...f, data: v }))} required />
+              <div className="sm:col-span-2">
+                <CampoCadastro label="Observação" value={formDetalhe.observacao} onChange={(v) => setFormDetalhe((f) => ({ ...f, observacao: v }))} />
+              </div>
+              <p className="sm:col-span-2 text-xs text-[#78909C]">
+                Produto, quantidade fabricada e itens usados não podem ser editados aqui — eles afetam o estoque. Para corrigir, exclua este pedido e registre novamente.
+              </p>
+            </div>
+          ) : (
+            <div>
+              <LinhaDetalhe label="Produto" valor={pedidoSelecionado.produtoNome} />
+              <LinhaDetalhe label="Data" valor={formatarData(pedidoSelecionado.data)} />
+              <LinhaDetalhe label="Quantidade fabricada" valor={pedidoSelecionado.qtdFabricada} />
+              <LinhaDetalhe label="Custo total" valor={formatarMoeda(pedidoSelecionado.valorTotal)} destaque />
+              {pedidoSelecionado.observacao && <LinhaDetalhe label="Observação" valor={pedidoSelecionado.observacao} />}
+
+              <p className="mb-2 mt-5 text-sm font-semibold text-[#90A4AE]">Itens usados</p>
+              {carregandoItensDetalhe ? (
+                <p className="py-3 text-xs text-[#78909C]">Carregando itens...</p>
+              ) : itensDetalhe.length > 0 ? (
+                <div className="overflow-auto rounded-xl border border-[#2a2a2a]">
+                  <table className="min-w-[480px] w-full text-left text-xs">
+                    <thead className="bg-[#181818] text-[#90A4AE]">
+                      <tr><Th>Peça</Th><Th>Qtd total</Th><Th>Fornecedor</Th><Th>Preço total</Th></tr>
+                    </thead>
+                    <tbody>
+                      {itensDetalhe.map((it) => (
+                        <tr key={it.id} className="border-t border-[#2a2a2a]">
+                          <Td className="font-semibold">{it.nomePeca}</Td>
+                          <Td>{it.qtdTotal}</Td>
+                          <Td>{it.fornecedorNome || "—"}</Td>
+                          <Td>{formatarMoeda(it.precoTotal)}</Td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="py-3 text-xs text-[#78909C]">Nenhum item registrado para este pedido.</p>
+              )}
+            </div>
+          )}
+          <ModalAcoes
+            editando={editandoDetalhe}
+            salvando={salvandoDetalhe}
+            onEditar={() => setEditandoDetalhe(true)}
+            onSalvar={handleSalvarDetalhePedido}
+            onCancelar={() => setEditandoDetalhe(false)}
+            onExcluir={handleExcluirDetalhePedido}
+          />
+        </Modal>
+      )}
     </div>
   );
 }
@@ -2705,6 +3400,17 @@ function BalanceteModulo({ usuarioId, dataHoje }: { usuarioId: string; dataHoje:
     nomeItem: "",
     valorUnitario: "",
     quantidade: "1",
+    nomeComprador: "" as NomeComprador | "",
+  });
+
+  const [itemSelecionado, setItemSelecionado] = useState<ItemBalancete | null>(null);
+  const [editandoDetalhe, setEditandoDetalhe] = useState(false);
+  const [salvandoDetalhe, setSalvandoDetalhe] = useState(false);
+  const [formDetalhe, setFormDetalhe] = useState({
+    data: "",
+    nomeItem: "",
+    valorUnitario: "",
+    quantidade: "",
     nomeComprador: "" as NomeComprador | "",
   });
 
@@ -2765,6 +3471,67 @@ function BalanceteModulo({ usuarioId, dataHoje }: { usuarioId: string; dataHoje:
     if (error) { setErro(error.message); return; }
     setItens((prev) => prev.filter((i) => i.id !== id));
     setMensagem("Item removido.");
+  }
+
+  function abrirDetalhe(item: ItemBalancete) {
+    setItemSelecionado(item);
+    setEditandoDetalhe(false);
+    setFormDetalhe({
+      data: item.data,
+      nomeItem: item.nomeItem,
+      valorUnitario: String(item.valorUnitario).replace(".", ","),
+      quantidade: String(item.quantidade),
+      nomeComprador: item.nomeComprador,
+    });
+  }
+
+  function fecharDetalhe() {
+    setItemSelecionado(null);
+    setEditandoDetalhe(false);
+  }
+
+  const valorTotalFormDetalhe =
+    parseNumero(formDetalhe.valorUnitario) * parseNumero(formDetalhe.quantidade || "1");
+
+  async function handleSalvarDetalhe() {
+    if (!itemSelecionado) return;
+    if (!formDetalhe.data || !formDetalhe.nomeItem.trim() || !formDetalhe.valorUnitario || !formDetalhe.nomeComprador) {
+      setErro("Preencha todos os campos obrigatórios.");
+      return;
+    }
+    setSalvandoDetalhe(true);
+    setErro("");
+    const supabase = createClient();
+    const payload = {
+      data: formDetalhe.data,
+      nome_item: formDetalhe.nomeItem.trim(),
+      valor_unitario: parseNumero(formDetalhe.valorUnitario),
+      quantidade: parseNumero(formDetalhe.quantidade || "1"),
+      valor_total: valorTotalFormDetalhe,
+      nome_comprador: formDetalhe.nomeComprador,
+    };
+    const { error } = await supabase.from("balancete").update(payload).eq("id", itemSelecionado.id);
+    setSalvandoDetalhe(false);
+    if (error) { setErro(error.message); return; }
+    const atualizado: ItemBalancete = {
+      id: itemSelecionado.id,
+      data: payload.data,
+      nomeItem: payload.nome_item,
+      valorUnitario: payload.valor_unitario,
+      quantidade: payload.quantidade,
+      valorTotal: payload.valor_total,
+      nomeComprador: payload.nome_comprador as NomeComprador,
+    };
+    setItens((prev) => prev.map((i) => i.id === itemSelecionado.id ? atualizado : i));
+    setItemSelecionado(atualizado);
+    setEditandoDetalhe(false);
+    setMensagem("Item atualizado.");
+  }
+
+  async function handleExcluirDetalhe() {
+    if (!itemSelecionado) return;
+    await handleExcluir(itemSelecionado.id);
+    fecharDetalhe();
   }
 
   const somaMatheus = itens.filter((i) => i.nomeComprador === "Matheus").reduce((s, i) => s + i.valorTotal, 0);
@@ -2853,7 +3620,11 @@ function BalanceteModulo({ usuarioId, dataHoje }: { usuarioId: string; dataHoje:
                 </thead>
                 <tbody>
                   {itensFiltrados.map((item) => (
-                    <tr key={item.id} className="border-t border-[#2a2a2a]">
+                    <tr
+                      key={item.id}
+                      onClick={() => abrirDetalhe(item)}
+                      className="cursor-pointer border-t border-[#2a2a2a] transition hover:bg-[#2a2a2a]"
+                    >
                       <Td>{formatarData(item.data)}</Td>
                       <Td>{item.nomeItem}</Td>
                       <Td>{formatarMoeda(item.valorUnitario)}</Td>
@@ -2869,7 +3640,7 @@ function BalanceteModulo({ usuarioId, dataHoje }: { usuarioId: string; dataHoje:
                         </span>
                       </Td>
                       <Td>
-                        <button type="button" onClick={() => handleExcluir(item.id)}
+                        <button type="button" onClick={(e) => { e.stopPropagation(); handleExcluir(item.id); }}
                           className="inline-flex h-8 items-center gap-1 rounded-xl border border-red-900/50 bg-red-900/10 px-2 text-xs font-semibold text-red-400 transition hover:bg-red-900/30">
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -2891,6 +3662,54 @@ function BalanceteModulo({ usuarioId, dataHoje }: { usuarioId: string; dataHoje:
           )}
         </div>
       </div>
+
+      {itemSelecionado && (
+        <Modal
+          titulo={editandoDetalhe ? "Editar item do balancete" : itemSelecionado.nomeItem}
+          subtitulo="Balancete"
+          onClose={fecharDetalhe}
+        >
+          <FeedbackBloco mensagem="" erro={erro} />
+          {editandoDetalhe ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <CampoCadastro label="Data" type="date" value={formDetalhe.data} onChange={(v) => setFormDetalhe((f) => ({ ...f, data: v }))} required />
+              <div className="sm:col-span-2">
+                <CampoCadastro label="Nome do item" value={formDetalhe.nomeItem} onChange={(v) => setFormDetalhe((f) => ({ ...f, nomeItem: v }))} required />
+              </div>
+              <CampoCadastro label="Valor unitário" value={formDetalhe.valorUnitario} onChange={(v) => setFormDetalhe((f) => ({ ...f, valorUnitario: v }))} required />
+              <CampoCadastro label="Quantidade" value={formDetalhe.quantidade} onChange={(v) => setFormDetalhe((f) => ({ ...f, quantidade: v }))} />
+              <SelectCadastro
+                label="Comprador"
+                value={formDetalhe.nomeComprador}
+                onChange={(v) => setFormDetalhe((f) => ({ ...f, nomeComprador: v as NomeComprador }))}
+                options={COMPRADORES_BALANCETE}
+                placeholder="Selecione..."
+              />
+              <div className="rounded-2xl border border-[#333333] bg-[#181818] px-4 py-3 text-sm">
+                <p className="text-xs text-[#78909C]">Valor total</p>
+                <p className="font-bold text-[#90A4AE]">{formatarMoeda(valorTotalFormDetalhe)}</p>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <LinhaDetalhe label="Data" valor={formatarData(itemSelecionado.data)} />
+              <LinhaDetalhe label="Nome do item" valor={itemSelecionado.nomeItem} />
+              <LinhaDetalhe label="Valor unitário" valor={formatarMoeda(itemSelecionado.valorUnitario)} />
+              <LinhaDetalhe label="Quantidade" valor={itemSelecionado.quantidade} />
+              <LinhaDetalhe label="Valor total" valor={formatarMoeda(itemSelecionado.valorTotal)} destaque />
+              <LinhaDetalhe label="Comprador" valor={itemSelecionado.nomeComprador} />
+            </div>
+          )}
+          <ModalAcoes
+            editando={editandoDetalhe}
+            salvando={salvandoDetalhe}
+            onEditar={() => setEditandoDetalhe(true)}
+            onSalvar={handleSalvarDetalhe}
+            onCancelar={() => setEditandoDetalhe(false)}
+            onExcluir={handleExcluirDetalhe}
+          />
+        </Modal>
+      )}
     </section>
   );
 }
@@ -3282,6 +4101,134 @@ function MarketplaceBadge({ marketplace }: { marketplace: Marketplace }) {
   );
 }
 
+function Modal({
+  titulo,
+  subtitulo,
+  onClose,
+  children,
+  largo,
+}: {
+  titulo: string;
+  subtitulo?: string;
+  onClose: () => void;
+  children: React.ReactNode;
+  largo?: boolean;
+}) {
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className={`w-full ${largo ? "max-w-2xl" : "max-w-lg"} max-h-[90vh] overflow-y-auto rounded-3xl border border-[#333333] bg-[#212121] p-6 shadow-xl`}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            {subtitulo && <p className="text-sm font-semibold text-[#90A4AE]">{subtitulo}</p>}
+            <h3 className="mt-1 text-xl font-bold">{titulo}</h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#333333] bg-[#181818] text-[#90A4AE] transition hover:bg-[#2a2a2a]"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="mt-5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function LinhaDetalhe({
+  label,
+  valor,
+  destaque,
+  alerta,
+}: {
+  label: string;
+  valor: React.ReactNode;
+  destaque?: boolean;
+  alerta?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 border-b border-[#2a2a2a] py-2.5 text-sm last:border-0">
+      <span className="text-[#90A4AE]">{label}</span>
+      <span className={`text-right font-semibold ${alerta ? "text-red-400" : destaque ? "text-[#90A4AE]" : "text-[#ECEFF1]"}`}>
+        {valor}
+      </span>
+    </div>
+  );
+}
+
+function ModalAcoes({
+  editando,
+  salvando,
+  onEditar,
+  onSalvar,
+  onCancelar,
+  onExcluir,
+}: {
+  editando: boolean;
+  salvando: boolean;
+  onEditar: () => void;
+  onSalvar: () => void;
+  onCancelar: () => void;
+  onExcluir: () => void;
+}) {
+  return (
+    <div className="mt-6 flex flex-wrap gap-3 border-t border-[#2a2a2a] pt-5">
+      {editando ? (
+        <>
+          <button
+            type="button"
+            onClick={onSalvar}
+            disabled={salvando}
+            className="inline-flex h-11 items-center gap-2 rounded-2xl bg-[#546E7A] px-4 text-sm font-semibold text-white transition hover:bg-[#455A64] disabled:opacity-60"
+          >
+            <Save className="h-4 w-4" />
+            {salvando ? "Salvando..." : "Salvar alterações"}
+          </button>
+          <button
+            type="button"
+            onClick={onCancelar}
+            className="inline-flex h-11 items-center gap-2 rounded-2xl border border-[#333333] bg-[#181818] px-4 text-sm font-semibold text-[#546E7A] transition hover:bg-[#2a2a2a]"
+          >
+            <X className="h-4 w-4" /> Cancelar
+          </button>
+        </>
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={onEditar}
+            className="inline-flex h-11 items-center gap-2 rounded-2xl bg-[#546E7A] px-4 text-sm font-semibold text-white transition hover:bg-[#455A64]"
+          >
+            <Pencil className="h-4 w-4" /> Editar
+          </button>
+          <button
+            type="button"
+            onClick={onExcluir}
+            className="inline-flex h-11 items-center gap-2 rounded-2xl border border-red-900/50 bg-red-900/10 px-4 text-sm font-semibold text-red-400 transition hover:bg-red-900/30"
+          >
+            <Trash2 className="h-4 w-4" /> Excluir
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Data mappers ─────────────────────────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -3406,6 +4353,20 @@ function mapCliente(r: any): Cliente {
     email: String(r.email ?? ""),
     cidade: String(r.cidade ?? ""),
     observacao: String(r.observacao ?? ""),
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapItemFabricacao(r: any): ItemFabricacao {
+  return {
+    id: String(r.id),
+    pedidoId: String(r.pedido_id ?? ""),
+    nomePeca: String(r.nome_peca ?? ""),
+    qtdPc: Number(r.qtd_pc ?? 0),
+    qtdTotal: Number(r.qtd_total ?? 0),
+    fornecedorNome: String(r.fornecedor_nome ?? ""),
+    precoUnitario: Number(r.preco_unitario ?? 0),
+    precoTotal: Number(r.preco_total ?? 0),
   };
 }
 
