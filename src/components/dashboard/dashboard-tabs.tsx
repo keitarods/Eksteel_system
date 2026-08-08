@@ -64,6 +64,65 @@ type ItemBalancete = {
 
 const COMPRADORES_BALANCETE: NomeComprador[] = ["Matheus", "Enyo"];
 
+function identificarComprador(nome: string): NomeComprador | null {
+  const n = nome.toLowerCase();
+  if (n.includes("matheus")) return "Matheus";
+  if (n.includes("enyo")) return "Enyo";
+  return null;
+}
+
+// Lança automaticamente o valor de uma compra no balancete: dividido 50/50 entre os sócios,
+// ou integral para quem registrou a compra. Não bloqueia o registro do pedido em caso de falha.
+async function lancarCompraNoBalancete({
+  dividir,
+  valorTotal,
+  data,
+  nomeItem,
+  usuarioId,
+  usuariosMap,
+}: {
+  dividir: boolean;
+  valorTotal: number;
+  data: string;
+  nomeItem: string;
+  usuarioId: string;
+  usuariosMap: Record<string, string>;
+}): Promise<string | null> {
+  if (valorTotal <= 0) return null;
+  const supabase = createClient();
+
+  if (dividir) {
+    const metade = valorTotal / 2;
+    const { error } = await supabase.from("balancete").insert(
+      COMPRADORES_BALANCETE.map((nomeComprador) => ({
+        criado_por: usuarioId,
+        data,
+        nome_item: nomeItem,
+        valor_unitario: metade,
+        quantidade: 1,
+        valor_total: metade,
+        nome_comprador: nomeComprador,
+      }))
+    );
+    return error ? `Não foi possível dividir no balancete: ${error.message}` : null;
+  }
+
+  const comprador = identificarComprador(usuariosMap[usuarioId] ?? "");
+  if (!comprador) {
+    return "Não foi possível identificar o sócio pra lançar no balancete — lance manualmente.";
+  }
+  const { error } = await supabase.from("balancete").insert({
+    criado_por: usuarioId,
+    data,
+    nome_item: nomeItem,
+    valor_unitario: valorTotal,
+    quantidade: 1,
+    valor_total: valorTotal,
+    nome_comprador: comprador,
+  });
+  return error ? `Não foi possível lançar no balancete: ${error.message}` : null;
+}
+
 type Marketplace = "Mercado Livre" | "Shopee" | "Site Próprio" | "Outro";
 
 type Produto = {
@@ -84,11 +143,16 @@ type Venda = {
   marketplace: Marketplace;
   produtoId: string;
   produtoNome: string;
+  kitId: string;
   quantidade: number;
   valorUnitario: number;
   taxaMarketplace: number;
   desconto: number;
   observacao: string;
+  criadoPor: string;
+  criadoEm: string;
+  atualizadoPor: string;
+  atualizadoEm: string;
 };
 
 type Despesa = {
@@ -133,6 +197,21 @@ type ComponenteProduto = {
   linkCompra: string;
 };
 
+type KitItem = {
+  id: string;
+  produtoId: string;
+  produtoNome: string;
+  produtoCodigo: string;
+  quantidade: number;
+};
+
+type Kit = {
+  id: string;
+  nome: string;
+  descricao: string;
+  itens: KitItem[];
+};
+
 type ItemFabricacao = {
   id: string;
   pedidoId: string;
@@ -161,6 +240,7 @@ type PedidoFabricacao = {
   data: string;
   valorTotal: number;
   observacao: string;
+  criadoPor: string;
 };
 
 type MembroEmpresa = {
@@ -179,6 +259,10 @@ type PedidoCompra = {
   status: "pendente" | "recebido" | "cancelado";
   valorTotal: number;
   observacao: string;
+  criadoPor: string;
+  criadoEm: string;
+  atualizadoPor: string;
+  atualizadoEm: string;
 };
 
 type DashboardTabsProps = {
@@ -279,6 +363,23 @@ function formatarData(iso: string) {
   return `${dia}/${mes}/${ano}`;
 }
 
+function formatarDataHora(iso: string) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+// Rótulo curto pra eixo de gráfico — o nome completo continua disponível no tooltip.
+function truncarRotulo(nome: string, max = 16) {
+  return nome.length > max ? `${nome.slice(0, max - 1)}…` : nome;
+}
+
+function nomeUsuario(mapa: Record<string, string>, usuarioId: string) {
+  if (!usuarioId) return "-";
+  return mapa[usuarioId] || "Usuário removido";
+}
+
 // Valor bruto: quantidade × valor unitário, sem nenhum desconto.
 function totalBrutoVenda(v: Venda) {
   return v.valorUnitario * v.quantidade;
@@ -287,6 +388,52 @@ function totalBrutoVenda(v: Venda) {
 // Valor líquido: bruto menos desconto concedido e taxa cobrada pelo marketplace — o que realmente entra no caixa.
 function totalLiquidoVenda(v: Venda) {
   return v.valorUnitario * v.quantidade - v.desconto - v.taxaMarketplace;
+}
+
+type ConsumoEstoque = { produtoId: string; quantidade: number };
+
+// Decompõe uma venda (de produto avulso ou de kit) na quantidade real consumida de cada produto.
+function itensConsumidosPelaVenda(
+  venda: { produtoId: string; kitId: string; quantidade: number },
+  kits: Kit[]
+): ConsumoEstoque[] {
+  if (venda.kitId) {
+    const kit = kits.find((k) => k.id === venda.kitId);
+    if (!kit) return [];
+    return kit.itens.map((it) => ({ produtoId: it.produtoId, quantidade: it.quantidade * venda.quantidade }));
+  }
+  if (venda.produtoId) return [{ produtoId: venda.produtoId, quantidade: venda.quantidade }];
+  return [];
+}
+
+function precoSugeridoKit(kit: Kit, produtos: Produto[]) {
+  return kit.itens.reduce((soma, it) => {
+    const produto = produtos.find((p) => p.id === it.produtoId);
+    return soma + (produto?.precoVenda ?? 0) * it.quantidade;
+  }, 0);
+}
+
+// Aplica no estoque a diferença entre o consumo antigo (revertido) e o novo (aplicado) — usado
+// tanto pra criar/excluir venda (um dos dois lados vazio) quanto pra editar (os dois preenchidos).
+async function aplicarDeltaEstoque(
+  supabase: ReturnType<typeof createClient>,
+  produtos: Produto[],
+  consumoAntigo: ConsumoEstoque[],
+  consumoNovo: ConsumoEstoque[]
+) {
+  const delta: Record<string, number> = {};
+  for (const item of consumoAntigo) delta[item.produtoId] = (delta[item.produtoId] ?? 0) + item.quantidade;
+  for (const item of consumoNovo) delta[item.produtoId] = (delta[item.produtoId] ?? 0) - item.quantidade;
+  await Promise.all(
+    Object.entries(delta)
+      .filter(([, d]) => d !== 0)
+      .map(([produtoId, d]) => {
+        const produto = produtos.find((p) => p.id === produtoId);
+        if (!produto) return null;
+        const novoSaldo = Math.max(0, produto.estoqueAtual + d);
+        return supabase.from("produtos").update({ estoque_atual: novoSaldo }).eq("id", produtoId);
+      })
+  );
 }
 
 // ─── Root component ───────────────────────────────────────────────────────────
@@ -363,6 +510,7 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [pedidosFabricacao, setPedidosFabricacao] = useState<PedidoFabricacao[]>([]);
   const [balancete, setBalancete] = useState<ItemBalancete[]>([]);
+  const [kits, setKits] = useState<Kit[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [termoBusca, setTermoBusca] = useState("");
@@ -379,12 +527,13 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
     let ativo = true;
     async function carregar() {
       const supabase = createClient();
-      const [{ data: v }, { data: d }, { data: p }, { data: pf }, { data: bl }] = await Promise.all([
+      const [{ data: v }, { data: d }, { data: p }, { data: pf }, { data: bl }, { data: kt }] = await Promise.all([
         supabase.from("vendas").select("*").order("data", { ascending: false }).limit(500),
         supabase.from("despesas").select("*").order("data", { ascending: false }),
         supabase.from("produtos").select("*").eq("ativo", true),
         supabase.from("pedidos_fabricacao").select("*").order("data", { ascending: false }).limit(500),
         supabase.from("balancete").select("*").order("data", { ascending: false }),
+        supabase.from("kits").select("id, nome, descricao, kit_itens(id, produto_id, quantidade, produtos(nome, codigo))"),
       ]);
       if (ativo) {
         setVendas((v ?? []).map(mapVenda));
@@ -392,6 +541,7 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
         setProdutos((p ?? []).map(mapProduto));
         setPedidosFabricacao((pf ?? []).map(mapPedidoFabricacao));
         setBalancete((bl ?? []).map(mapItemBalancete));
+        setKits((kt ?? []).map(mapKit));
         setCarregando(false);
       }
     }
@@ -493,9 +643,17 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
     custoUnitFabMap[p.id] = totalQtd > 0 ? totalCusto / totalQtd : 0;
   });
 
+  // Quantidade de cada produto efetivamente consumida pelas vendas — direta ou via componentes de kit.
+  const consumoPorProduto: Record<string, number> = {};
+  vendas.forEach((v) => {
+    itensConsumidosPelaVenda(v, kits).forEach((item) => {
+      consumoPorProduto[item.produtoId] = (consumoPorProduto[item.produtoId] ?? 0) + item.quantidade;
+    });
+  });
+
   // COGS: fabrication cost of items actually sold (not total fabricated)
-  const custoFabricacaoVendidos = vendas.reduce(
-    (s, v) => s + v.quantidade * (custoUnitFabMap[v.produtoId] ?? 0),
+  const custoFabricacaoVendidos = Object.entries(consumoPorProduto).reduce(
+    (s, [produtoId, qtd]) => s + qtd * (custoUnitFabMap[produtoId] ?? 0),
     0
   );
 
@@ -513,7 +671,7 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
     const totalCustoFab = ordens.reduce((s, pf) => s + pf.valorTotal, 0);
     const totalQtdFab = ordens.reduce((s, pf) => s + pf.qtdFabricada, 0);
     const custoUnitFab = totalQtdFab > 0 ? totalCustoFab / totalQtdFab : 0;
-    const saidas = vendas.filter((v) => v.produtoId === p.id).reduce((s, v) => s + v.quantidade, 0);
+    const saidas = consumoPorProduto[p.id] ?? 0;
     const saldoReal = Math.max(0, totalQtdFab - saidas);
     return { ...p, saldoReal, custoUnitFab, capital: saldoReal * custoUnitFab };
   });
@@ -540,10 +698,16 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
     name: mp,
     value: vendas.filter((v) => v.marketplace === mp).reduce((s, v) => s + totalLiquidoVenda(v), 0),
   })).filter((x) => x.value > 0);
-  const receitaPorProduto = produtos.map((p) => ({
-    name: p.nome,
-    value: vendas.filter((v) => v.produtoId === p.id).reduce((s, v) => s + totalLiquidoVenda(v), 0),
-  })).filter((x) => x.value > 0);
+  const receitaPorProduto = [
+    ...produtos.map((p) => ({
+      name: p.nome,
+      value: vendas.filter((v) => v.produtoId === p.id).reduce((s, v) => s + totalLiquidoVenda(v), 0),
+    })),
+    ...kits.map((k) => ({
+      name: k.nome,
+      value: vendas.filter((v) => v.kitId === k.id).reduce((s, v) => s + totalLiquidoVenda(v), 0),
+    })),
+  ].filter((x) => x.value > 0);
   const despesasPorCategoria = [
     ...CATEGORIAS_DESPESA.map((cat) => ({
       name: cat,
@@ -556,7 +720,7 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
   ].filter((x) => x.value > 0);
   const custoPorProduto = produtos.map((p) => ({
     name: p.nome,
-    value: vendas.filter((v) => v.produtoId === p.id).reduce((s, v) => s + v.quantidade * (custoUnitFabMap[p.id] ?? 0), 0),
+    value: (consumoPorProduto[p.id] ?? 0) * (custoUnitFabMap[p.id] ?? 0),
   })).filter((x) => x.value > 0);
 
   // ─── Balancete calculations ───
@@ -910,6 +1074,8 @@ function VendasModulo({
 }) {
   const [vendas, setVendas] = useState<Venda[]>([]);
   const [produtos, setProdutos] = useState<Produto[]>([]);
+  const [kits, setKits] = useState<Kit[]>([]);
+  const [usuariosMap, setUsuariosMap] = useState<Record<string, string>>({});
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [termoBusca, setTermoBusca] = useState("");
@@ -923,6 +1089,7 @@ function VendasModulo({
     data: "",
     marketplace: "" as Marketplace | "",
     produtoId: "",
+    kitId: "",
     quantidade: "",
     valorUnitario: "",
     taxaMarketplace: "",
@@ -934,6 +1101,7 @@ function VendasModulo({
     data: dataHoje,
     marketplace: "" as Marketplace | "",
     produtoId: "",
+    kitId: "",
     quantidade: "1",
     valorUnitario: "",
     taxaMarketplace: "0",
@@ -945,22 +1113,28 @@ function VendasModulo({
     let ativo = true;
     async function carregar() {
       const supabase = createClient();
-      const [{ data: v }, { data: p }] = await Promise.all([
+      const [{ data: v }, { data: p }, { data: kt }, { data: u }] = await Promise.all([
         supabase
           .from("vendas")
           .select("*")
-          
+
           .order("data", { ascending: false }),
         supabase
           .from("produtos")
           .select("*")
-          
+
           .eq("ativo", true)
           .order("nome"),
+        supabase.from("kits").select("id, nome, descricao, kit_itens(id, produto_id, quantidade, produtos(nome, codigo))").order("nome"),
+        supabase.from("usuarios_empresa").select("usuario_id, nome, email"),
       ]);
       if (ativo) {
         setVendas((v ?? []).map(mapVenda));
         setProdutos((p ?? []).map(mapProduto));
+        setKits((kt ?? []).map(mapKit));
+        setUsuariosMap(
+          Object.fromEntries((u ?? []).map((m) => [String(m.usuario_id), String(m.nome || m.email || "")]))
+        );
         setCarregando(false);
       }
     }
@@ -968,16 +1142,25 @@ function VendasModulo({
     return () => { ativo = false; };
   }, [usuarioId]);
 
-  function preencherPrecoProduto(produtoId: string) {
-    const produto = produtos.find((p) => p.id === produtoId);
-    if (produto) {
+  function selecionarItemVenda(value: string) {
+    if (value.startsWith("produto:")) {
+      const produto = produtos.find((p) => p.id === value.slice("produto:".length));
       setForm((f) => ({
         ...f,
-        produtoId,
-        valorUnitario: String(produto.precoVenda).replace(".", ","),
+        produtoId: produto?.id ?? "",
+        kitId: "",
+        valorUnitario: produto ? String(produto.precoVenda).replace(".", ",") : f.valorUnitario,
+      }));
+    } else if (value.startsWith("kit:")) {
+      const kit = kits.find((k) => k.id === value.slice("kit:".length));
+      setForm((f) => ({
+        ...f,
+        produtoId: "",
+        kitId: kit?.id ?? "",
+        valorUnitario: kit ? String(precoSugeridoKit(kit, produtos)).replace(".", ",") : f.valorUnitario,
       }));
     } else {
-      setForm((f) => ({ ...f, produtoId }));
+      setForm((f) => ({ ...f, produtoId: "", kitId: "" }));
     }
   }
 
@@ -986,8 +1169,8 @@ function VendasModulo({
     setMensagem("");
     setErro("");
 
-    if (!form.data || !form.marketplace || !form.produtoId) {
-      setErro("Preencha data, marketplace e produto.");
+    if (!form.data || !form.marketplace || !(form.produtoId || form.kitId)) {
+      setErro("Preencha data, marketplace e produto ou kit.");
       return;
     }
 
@@ -996,7 +1179,9 @@ function VendasModulo({
       return;
     }
 
-    const produto = produtos.find((p) => p.id === form.produtoId);
+    const produto = form.produtoId ? produtos.find((p) => p.id === form.produtoId) : null;
+    const kit = form.kitId ? kits.find((k) => k.id === form.kitId) : null;
+    const quantidade = parseNumero(form.quantidade);
     setSalvando(true);
 
     const supabase = createClient();
@@ -1006,9 +1191,10 @@ function VendasModulo({
         criado_por: usuarioId,
         data: form.data,
         marketplace: form.marketplace,
-        produto_id: form.produtoId,
-        produto_nome: produto?.nome ?? "",
-        quantidade: parseNumero(form.quantidade),
+        produto_id: form.produtoId || null,
+        kit_id: form.kitId || null,
+        produto_nome: produto?.nome ?? kit?.nome ?? "",
+        quantidade,
         valor_unitario: parseNumero(form.valorUnitario),
         taxa_marketplace: parseNumero(form.taxaMarketplace),
         desconto: parseNumero(form.desconto),
@@ -1017,9 +1203,8 @@ function VendasModulo({
       .select()
       .single();
 
-    setSalvando(false);
-
     if (error) {
+      setSalvando(false);
       setErro(error.message);
       return;
     }
@@ -1028,17 +1213,16 @@ function VendasModulo({
       setVendas((prev) => [mapVenda(data), ...prev]);
     }
 
-    // Decrement stock on sale
-    if (produto) {
-      const qtdVendida = parseNumero(form.quantidade);
-      const novoSaldo = Math.max(0, produto.estoqueAtual - qtdVendida);
-      await supabase.from("produtos").update({ estoque_atual: novoSaldo }).eq("id", form.produtoId);
-    }
+    // Decrement stock (do produto direto, ou de cada item do kit vendido)
+    const consumo = itensConsumidosPelaVenda({ produtoId: form.produtoId, kitId: form.kitId, quantidade }, kits);
+    await aplicarDeltaEstoque(supabase, produtos, [], consumo);
+    setSalvando(false);
 
     setForm({
       data: dataHoje,
       marketplace: "",
       produtoId: "",
+      kitId: "",
       quantidade: "1",
       valorUnitario: "",
       taxaMarketplace: "0",
@@ -1051,7 +1235,6 @@ function VendasModulo({
   async function handleExcluir(id: string) {
     if (!confirm("Excluir esta venda?")) return;
     const venda = vendas.find((v) => v.id === id);
-    const produto = venda ? produtos.find((p) => p.id === venda.produtoId) : null;
 
     const supabase = createClient();
     const { error } = await supabase.from("vendas").delete().eq("id", id);
@@ -1062,10 +1245,9 @@ function VendasModulo({
     }
 
     // Restore stock on sale deletion
-    if (venda && produto) {
-      await supabase.from("produtos").update({
-        estoque_atual: produto.estoqueAtual + venda.quantidade,
-      }).eq("id", venda.produtoId);
+    if (venda) {
+      const consumo = itensConsumidosPelaVenda(venda, kits);
+      await aplicarDeltaEstoque(supabase, produtos, consumo, []);
     }
 
     setVendas((prev) => prev.filter((v) => v.id !== id));
@@ -1079,6 +1261,7 @@ function VendasModulo({
       data: venda.data,
       marketplace: venda.marketplace,
       produtoId: venda.produtoId,
+      kitId: venda.kitId,
       quantidade: String(venda.quantidade),
       valorUnitario: String(venda.valorUnitario).replace(".", ","),
       taxaMarketplace: String(venda.taxaMarketplace).replace(".", ","),
@@ -1094,8 +1277,8 @@ function VendasModulo({
 
   async function handleSalvarDetalhe() {
     if (!vendaSelecionada) return;
-    if (!formDetalhe.data || !formDetalhe.marketplace || !formDetalhe.produtoId) {
-      setErro("Preencha data, marketplace e produto.");
+    if (!formDetalhe.data || !formDetalhe.marketplace || !(formDetalhe.produtoId || formDetalhe.kitId)) {
+      setErro("Preencha data, marketplace e produto ou kit.");
       return;
     }
     if (parseNumero(formDetalhe.quantidade) <= 0 || parseNumero(formDetalhe.valorUnitario) <= 0) {
@@ -1106,48 +1289,39 @@ function VendasModulo({
     setSalvandoDetalhe(true);
     setErro("");
     const supabase = createClient();
-    const produtoNovo = produtos.find((p) => p.id === formDetalhe.produtoId);
+    const produtoNovo = formDetalhe.produtoId ? produtos.find((p) => p.id === formDetalhe.produtoId) : null;
+    const kitNovo = formDetalhe.kitId ? kits.find((k) => k.id === formDetalhe.kitId) : null;
     const payload = {
       data: formDetalhe.data,
       marketplace: formDetalhe.marketplace,
-      produto_id: formDetalhe.produtoId,
-      produto_nome: produtoNovo?.nome ?? vendaSelecionada.produtoNome,
+      produto_id: formDetalhe.produtoId || null,
+      kit_id: formDetalhe.kitId || null,
+      produto_nome: produtoNovo?.nome ?? kitNovo?.nome ?? vendaSelecionada.produtoNome,
       quantidade: parseNumero(formDetalhe.quantidade),
       valor_unitario: parseNumero(formDetalhe.valorUnitario),
       taxa_marketplace: parseNumero(formDetalhe.taxaMarketplace),
       desconto: parseNumero(formDetalhe.desconto),
       observacao: formDetalhe.observacao.trim(),
+      atualizado_por: usuarioId,
+      atualizado_em: new Date().toISOString(),
     };
 
     const { error } = await supabase.from("vendas").update(payload).eq("id", vendaSelecionada.id);
     setSalvandoDetalhe(false);
     if (error) { setErro(error.message); return; }
 
-    // Reconcile stock: undo old sale's effect, apply new sale's effect
-    const qtdAntiga = vendaSelecionada.quantidade;
-    const qtdNova = payload.quantidade;
-    if (vendaSelecionada.produtoId === payload.produto_id) {
-      const delta = qtdNova - qtdAntiga;
-      if (delta !== 0 && produtoNovo) {
-        await supabase.from("produtos").update({
-          estoque_atual: Math.max(0, produtoNovo.estoqueAtual - delta),
-        }).eq("id", payload.produto_id);
-      }
-    } else {
-      const produtoAntigo = produtos.find((p) => p.id === vendaSelecionada.produtoId);
-      if (produtoAntigo) {
-        await supabase.from("produtos").update({
-          estoque_atual: produtoAntigo.estoqueAtual + qtdAntiga,
-        }).eq("id", vendaSelecionada.produtoId);
-      }
-      if (produtoNovo) {
-        await supabase.from("produtos").update({
-          estoque_atual: Math.max(0, produtoNovo.estoqueAtual - qtdNova),
-        }).eq("id", payload.produto_id);
-      }
-    }
+    // Reconcile stock: reverte o consumo antigo (produto ou kit) e aplica o novo
+    const consumoAntigo = itensConsumidosPelaVenda(vendaSelecionada, kits);
+    const consumoNovo = itensConsumidosPelaVenda(
+      { produtoId: payload.produto_id ?? "", kitId: payload.kit_id ?? "", quantidade: payload.quantidade },
+      kits
+    );
+    await aplicarDeltaEstoque(supabase, produtos, consumoAntigo, consumoNovo);
 
-    const vendaAtualizada: Venda = { ...vendaSelecionada, ...mapVenda({ id: vendaSelecionada.id, ...payload }) };
+    const vendaAtualizada: Venda = {
+      ...vendaSelecionada,
+      ...mapVenda({ id: vendaSelecionada.id, criado_por: vendaSelecionada.criadoPor, criado_em: vendaSelecionada.criadoEm, ...payload }),
+    };
     setVendas((prev) => prev.map((v) => v.id === vendaSelecionada.id ? vendaAtualizada : v));
     setVendaSelecionada(vendaAtualizada);
     setEditandoDetalhe(false);
@@ -1211,18 +1385,27 @@ function VendasModulo({
               placeholder="Selecione..."
             />
             <div className="sm:col-span-2">
-              <label className="mb-1 block text-sm font-medium">Produto</label>
+              <label className="mb-1 block text-sm font-medium">Produto ou kit</label>
               <select
-                value={form.produtoId}
-                onChange={(e) => preencherPrecoProduto(e.target.value)}
+                value={form.produtoId ? `produto:${form.produtoId}` : form.kitId ? `kit:${form.kitId}` : ""}
+                onChange={(e) => selecionarItemVenda(e.target.value)}
                 className="w-full rounded-2xl border border-[#333333] bg-[#141414] px-4 py-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
               >
-                <option value="">Selecione um produto...</option>
-                {produtos.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.codigo ? `[${p.codigo}] ` : ""}{p.nome}
-                  </option>
-                ))}
+                <option value="">Selecione um produto ou kit...</option>
+                <optgroup label="Produtos">
+                  {produtos.map((p) => (
+                    <option key={p.id} value={`produto:${p.id}`}>
+                      {p.codigo ? `[${p.codigo}] ` : ""}{p.nome}
+                    </option>
+                  ))}
+                </optgroup>
+                {kits.length > 0 && (
+                  <optgroup label="Kits">
+                    {kits.map((k) => (
+                      <option key={k.id} value={`kit:${k.id}`}>{k.nome}</option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             </div>
             <CampoCadastro
@@ -1304,6 +1487,7 @@ function VendasModulo({
                       <Th>Qtd</Th>
                       <Th>Bruto</Th>
                       <Th>Líquido</Th>
+                      <Th>Lançado por</Th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1317,10 +1501,16 @@ function VendasModulo({
                         <Td>
                           <MarketplaceBadge marketplace={v.marketplace} />
                         </Td>
-                        <Td className="font-semibold">{v.produtoNome || "-"}</Td>
+                        <Td className="font-semibold">
+                          {v.produtoNome || "-"}
+                          {v.kitId && (
+                            <span className="ml-1.5 rounded-full bg-[#546E7A]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#90A4AE]">kit</span>
+                          )}
+                        </Td>
                         <Td>{v.quantidade}</Td>
                         <Td>{formatarMoeda(totalBrutoVenda(v))}</Td>
                         <Td className="font-semibold text-[#90A4AE]">{formatarMoeda(totalLiquidoVenda(v))}</Td>
+                        <Td className="text-xs text-[#78909C]">{nomeUsuario(usuariosMap, v.criadoPor)}</Td>
                       </tr>
                     ))}
                   </tbody>
@@ -1346,16 +1536,34 @@ function VendasModulo({
               <CampoCadastro label="Data" type="date" value={formDetalhe.data} onChange={(v) => setFormDetalhe((f) => ({ ...f, data: v }))} required />
               <SelectCadastro label="Marketplace" value={formDetalhe.marketplace} onChange={(v) => setFormDetalhe((f) => ({ ...f, marketplace: v as Marketplace }))} options={MARKETPLACES} placeholder="Selecione..." />
               <div className="sm:col-span-2">
-                <label className="mb-1 block text-sm font-medium">Produto</label>
+                <label className="mb-1 block text-sm font-medium">Produto ou kit</label>
                 <select
-                  value={formDetalhe.produtoId}
-                  onChange={(e) => setFormDetalhe((f) => ({ ...f, produtoId: e.target.value }))}
+                  value={formDetalhe.produtoId ? `produto:${formDetalhe.produtoId}` : formDetalhe.kitId ? `kit:${formDetalhe.kitId}` : ""}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value.startsWith("produto:")) {
+                      setFormDetalhe((f) => ({ ...f, produtoId: value.slice("produto:".length), kitId: "" }));
+                    } else if (value.startsWith("kit:")) {
+                      setFormDetalhe((f) => ({ ...f, produtoId: "", kitId: value.slice("kit:".length) }));
+                    } else {
+                      setFormDetalhe((f) => ({ ...f, produtoId: "", kitId: "" }));
+                    }
+                  }}
                   className="w-full rounded-2xl border border-[#333333] bg-[#141414] px-4 py-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
                 >
-                  <option value="">Selecione um produto...</option>
-                  {produtos.map((p) => (
-                    <option key={p.id} value={p.id}>{p.codigo ? `[${p.codigo}] ` : ""}{p.nome}</option>
-                  ))}
+                  <option value="">Selecione um produto ou kit...</option>
+                  <optgroup label="Produtos">
+                    {produtos.map((p) => (
+                      <option key={p.id} value={`produto:${p.id}`}>{p.codigo ? `[${p.codigo}] ` : ""}{p.nome}</option>
+                    ))}
+                  </optgroup>
+                  {kits.length > 0 && (
+                    <optgroup label="Kits">
+                      {kits.map((k) => (
+                        <option key={k.id} value={`kit:${k.id}`}>{k.nome}</option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
               </div>
               <CampoCadastro label="Quantidade" value={formDetalhe.quantidade} onChange={(v) => setFormDetalhe((f) => ({ ...f, quantidade: v }))} required />
@@ -1370,14 +1578,36 @@ function VendasModulo({
             <div>
               <LinhaDetalhe label="Data" valor={formatarData(vendaSelecionada.data)} />
               <LinhaDetalhe label="Marketplace" valor={<MarketplaceBadge marketplace={vendaSelecionada.marketplace} />} />
-              <LinhaDetalhe label="Produto" valor={vendaSelecionada.produtoNome || "-"} />
+              <LinhaDetalhe label={vendaSelecionada.kitId ? "Kit" : "Produto"} valor={vendaSelecionada.produtoNome || "-"} />
               <LinhaDetalhe label="Quantidade" valor={vendaSelecionada.quantidade} />
+              {vendaSelecionada.kitId && (() => {
+                const kit = kits.find((k) => k.id === vendaSelecionada.kitId);
+                return kit ? (
+                  <div className="border-b border-[#2a2a2a] py-2.5 text-sm">
+                    <span className="text-[#90A4AE]">Consumo do estoque</span>
+                    <ul className="mt-1.5 space-y-1 text-xs text-[#78909C]">
+                      {kit.itens.map((it) => (
+                        <li key={it.id}>
+                          {it.quantidade * vendaSelecionada.quantidade}× {it.produtoNome}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null;
+              })()}
               <LinhaDetalhe label="Valor unitário" valor={formatarMoeda(vendaSelecionada.valorUnitario)} />
               <LinhaDetalhe label="Subtotal bruto" valor={formatarMoeda(vendaSelecionada.valorUnitario * vendaSelecionada.quantidade)} />
               <LinhaDetalhe label="Desconto" valor={`- ${formatarMoeda(vendaSelecionada.desconto)}`} alerta={vendaSelecionada.desconto > 0} />
               <LinhaDetalhe label="Taxa marketplace" valor={`- ${formatarMoeda(vendaSelecionada.taxaMarketplace)}`} alerta={vendaSelecionada.taxaMarketplace > 0} />
               <LinhaDetalhe label="Valor líquido recebido" valor={formatarMoeda(totalLiquidoVenda(vendaSelecionada))} destaque />
               {vendaSelecionada.observacao && <LinhaDetalhe label="Observação" valor={vendaSelecionada.observacao} />}
+              <HistoricoRegistro
+                usuariosMap={usuariosMap}
+                criadoPor={vendaSelecionada.criadoPor}
+                criadoEm={vendaSelecionada.criadoEm}
+                atualizadoPor={vendaSelecionada.atualizadoPor}
+                atualizadoEm={vendaSelecionada.atualizadoEm}
+              />
             </div>
           )}
           <ModalAcoes
@@ -1405,29 +1635,32 @@ function CadastroModulo({
   isAdmin: boolean;
   dataHoje: string;
 }) {
-  type AbaC = "produtos" | "materias-primas" | "clientes" | "fornecedores";
+  type AbaC = "produtos" | "materias-primas" | "clientes" | "fornecedores" | "kits";
   const [aba, setAba] = useState<AbaC>("produtos");
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [materiasPrimas, setMateriasPrimas] = useState<MateriaPrima[]>([]);
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
+  const [kits, setKits] = useState<Kit[]>([]);
   const [carregando, setCarregando] = useState(true);
 
   useEffect(() => {
     let ativo = true;
     async function carregar() {
       const supabase = createClient();
-      const [{ data: p }, { data: mp }, { data: cl }, { data: fo }] = await Promise.all([
+      const [{ data: p }, { data: mp }, { data: cl }, { data: fo }, { data: kt }] = await Promise.all([
         supabase.from("produtos").select("*").order("nome"),
         supabase.from("materias_primas").select("*").eq("ativo", true).order("nome"),
         supabase.from("clientes").select("*").order("nome"),
         supabase.from("fornecedores").select("*").order("nome"),
+        supabase.from("kits").select("id, nome, descricao, kit_itens(id, produto_id, quantidade, produtos(nome, codigo))").order("nome"),
       ]);
       if (ativo) {
         setProdutos((p ?? []).map(mapProduto));
         setMateriasPrimas((mp ?? []).map(mapMateriaPrima));
         setClientes((cl ?? []).map(mapCliente));
         setFornecedores((fo ?? []).map(mapFornecedor));
+        setKits((kt ?? []).map(mapKit));
         setCarregando(false);
       }
     }
@@ -1442,6 +1675,7 @@ function CadastroModulo({
     { id: "materias-primas", label: "Matérias-primas" },
     { id: "clientes", label: "Clientes" },
     { id: "fornecedores", label: "Fornecedores" },
+    { id: "kits", label: "Kits" },
   ];
 
   return (
@@ -1476,6 +1710,9 @@ function CadastroModulo({
       )}
       {aba === "fornecedores" && (
         <FornecedoresSubModulo usuarioId={usuarioId} isAdmin={isAdmin} fornecedores={fornecedores} setFornecedores={setFornecedores} />
+      )}
+      {aba === "kits" && (
+        <KitsSubModulo usuarioId={usuarioId} isAdmin={isAdmin} produtos={produtos} kits={kits} setKits={setKits} />
       )}
     </section>
   );
@@ -1926,6 +2163,390 @@ function ProdutosSubModulo({
               </div>
             ) : (
               <p className="py-3 text-xs text-[#78909C]">Nenhuma matéria-prima cadastrada para este produto.</p>
+            )}
+          </div>
+
+          <div className="mt-6 flex flex-wrap gap-3 border-t border-[#2a2a2a] pt-5">
+            <button
+              type="button"
+              onClick={handleEditarDoDetalhe}
+              className="inline-flex h-11 items-center gap-2 rounded-2xl bg-[#546E7A] px-4 text-sm font-semibold text-white transition hover:bg-[#455A64]"
+            >
+              <Pencil className="h-4 w-4" /> Editar
+            </button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={handleExcluirDoDetalhe}
+                className="inline-flex h-11 items-center gap-2 rounded-2xl border border-red-900/50 bg-red-900/10 px-4 text-sm font-semibold text-red-400 transition hover:bg-red-900/30"
+              >
+                <Trash2 className="h-4 w-4" /> Excluir
+              </button>
+            )}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── Kits ───────────────────────────────────────────────────────────────────
+
+type KitItemRascunho = { tempId: string; produtoId: string; produtoNome: string; produtoCodigo: string; quantidade: number };
+
+function KitsSubModulo({
+  usuarioId,
+  isAdmin,
+  produtos,
+  kits,
+  setKits,
+}: {
+  usuarioId: string;
+  isAdmin: boolean;
+  produtos: Produto[];
+  kits: Kit[];
+  setKits: React.Dispatch<React.SetStateAction<Kit[]>>;
+}) {
+  const [salvando, setSalvando] = useState(false);
+  const [termoBusca, setTermoBusca] = useState("");
+  const [editandoId, setEditandoId] = useState<string | null>(null);
+  const [mensagem, setMensagem] = useState("");
+  const [erro, setErro] = useState("");
+
+  const [form, setForm] = useState({ nome: "", descricao: "" });
+  const [itensRascunho, setItensRascunho] = useState<KitItemRascunho[]>([]);
+  const [itensEdicao, setItensEdicao] = useState<KitItem[]>([]);
+  const [salvandoItem, setSalvandoItem] = useState(false);
+  const [formItem, setFormItem] = useState({ produtoId: "", quantidade: "1" });
+
+  const [kitSelecionado, setKitSelecionado] = useState<Kit | null>(null);
+
+  function selecionarProdutoItem(produtoId: string) {
+    const produto = produtos.find((p) => p.id === produtoId);
+    setFormItem(produto
+      ? { produtoId, quantidade: "1" }
+      : { produtoId: "", quantidade: "1" }
+    );
+  }
+
+  function adicionarItemRascunho() {
+    const produto = produtos.find((p) => p.id === formItem.produtoId);
+    if (!produto) { setErro("Selecione um produto."); return; }
+    setErro("");
+    setItensRascunho((prev) => [
+      ...prev,
+      {
+        tempId: crypto.randomUUID(),
+        produtoId: produto.id,
+        produtoNome: produto.nome,
+        produtoCodigo: produto.codigo,
+        quantidade: parseNumero(formItem.quantidade) || 1,
+      },
+    ]);
+    setFormItem({ produtoId: "", quantidade: "1" });
+  }
+
+  async function adicionarItemEdicao(kitId: string) {
+    const produto = produtos.find((p) => p.id === formItem.produtoId);
+    if (!produto) { setErro("Selecione um produto."); return; }
+    setSalvandoItem(true);
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("kit_itens")
+      .insert({
+        kit_id: kitId,
+        criado_por: usuarioId,
+        produto_id: produto.id,
+        quantidade: parseNumero(formItem.quantidade) || 1,
+      })
+      .select("id, produto_id, quantidade, produtos(nome, codigo)")
+      .single();
+    setSalvandoItem(false);
+    if (error) { setErro(error.message); return; }
+    if (data) setItensEdicao((prev) => [...prev, mapKitItem(data)]);
+    setFormItem({ produtoId: "", quantidade: "1" });
+  }
+
+  async function removerItemEdicao(itemId: string) {
+    if (!confirm("Remover este item do kit?")) return;
+    const supabase = createClient();
+    const { error } = await supabase.from("kit_itens").delete().eq("id", itemId);
+    if (error) { setErro(error.message); return; }
+    setItensEdicao((prev) => prev.filter((i) => i.id !== itemId));
+  }
+
+  function limparForm() {
+    setForm({ nome: "", descricao: "" });
+    setItensRascunho([]); setItensEdicao([]);
+    setFormItem({ produtoId: "", quantidade: "1" });
+    setEditandoId(null); setMensagem(""); setErro("");
+  }
+
+  function iniciarEdicao(kit: Kit) {
+    setForm({ nome: kit.nome, descricao: kit.descricao });
+    setItensRascunho([]);
+    setItensEdicao(kit.itens);
+    setEditandoId(kit.id);
+    setFormItem({ produtoId: "", quantidade: "1" });
+    setMensagem(""); setErro("");
+  }
+
+  function abrirDetalhe(kit: Kit) {
+    setKitSelecionado(kit);
+  }
+
+  function fecharDetalhe() {
+    setKitSelecionado(null);
+  }
+
+  function handleEditarDoDetalhe() {
+    if (!kitSelecionado) return;
+    const kit = kitSelecionado;
+    fecharDetalhe();
+    iniciarEdicao(kit);
+  }
+
+  async function handleExcluirDoDetalhe() {
+    if (!kitSelecionado) return;
+    const id = kitSelecionado.id;
+    fecharDetalhe();
+    await handleExcluir(id);
+  }
+
+  async function handleSalvar(e: React.FormEvent) {
+    e.preventDefault();
+    setMensagem(""); setErro("");
+    if (!form.nome.trim()) { setErro("Informe o nome do kit."); return; }
+    setSalvando(true);
+    const supabase = createClient();
+    const payload = {
+      criado_por: usuarioId,
+      nome: form.nome.trim(),
+      descricao: form.descricao.trim(),
+    };
+    if (editandoId) {
+      const { error } = await supabase.from("kits").update(payload).eq("id", editandoId);
+      setSalvando(false);
+      if (error) { setErro(error.message); return; }
+      setKits((prev) => prev.map((k) => k.id === editandoId ? { ...k, nome: payload.nome, descricao: payload.descricao, itens: itensEdicao } : k));
+      setMensagem("Kit atualizado."); limparForm();
+    } else {
+      if (itensRascunho.length === 0) { setSalvando(false); setErro("Adicione pelo menos um item ao kit."); return; }
+      const { data, error } = await supabase.from("kits").insert(payload).select().single();
+      if (error) { setSalvando(false); setErro(error.message); return; }
+      await supabase.from("kit_itens").insert(
+        itensRascunho.map((it) => ({ kit_id: data.id, criado_por: usuarioId, produto_id: it.produtoId, quantidade: it.quantidade }))
+      );
+      setSalvando(false);
+      setKits((prev) => [
+        {
+          id: String(data.id),
+          nome: payload.nome,
+          descricao: payload.descricao,
+          itens: itensRascunho.map((it) => ({ id: it.tempId, produtoId: it.produtoId, produtoNome: it.produtoNome, produtoCodigo: it.produtoCodigo, quantidade: it.quantidade })),
+        },
+        ...prev,
+      ]);
+      setMensagem(`Kit cadastrado com ${itensRascunho.length} item(ns).`); limparForm();
+    }
+  }
+
+  async function handleExcluir(id: string) {
+    if (!confirm("Excluir este kit?")) return;
+    const supabase = createClient();
+    const { error } = await supabase.from("kits").delete().eq("id", id);
+    if (error) { setErro(error.message); return; }
+    setKits((prev) => prev.filter((k) => k.id !== id));
+    if (editandoId === id) limparForm();
+    setMensagem("Kit removido.");
+  }
+
+  const kitsFiltrados = kits.filter((k) => {
+    const q = termoBusca.toLowerCase();
+    return !q || k.nome.toLowerCase().includes(q) || k.itens.some((i) => i.produtoNome.toLowerCase().includes(q) || i.produtoCodigo.toLowerCase().includes(q));
+  });
+
+  const itensAtivos = editandoId ? itensEdicao : itensRascunho;
+
+  return (
+    <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+      <form onSubmit={handleSalvar} className="rounded-3xl border border-[#333333] bg-[#181818] p-5 self-start">
+        <p className="text-sm font-semibold text-[#90A4AE]">{editandoId ? "Editando kit" : "Novo kit"}</p>
+        <FeedbackBloco mensagem={mensagem} erro={erro} />
+        <div className="mt-4 grid gap-4">
+          <CampoCadastro label="Nome do kit" value={form.nome} onChange={(v) => setForm((f) => ({ ...f, nome: v }))} placeholder="Ex: Kit 2 Carrinhos 400kg" required />
+          <CampoCadastro label="Descrição" value={form.descricao} onChange={(v) => setForm((f) => ({ ...f, descricao: v }))} placeholder="Observação opcional" />
+        </div>
+
+        <div className="mt-5 rounded-2xl border border-[#333333] bg-[#212121] p-4">
+          <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Produtos do kit</p>
+          {itensAtivos.length > 0 && (
+            <div className="mb-3 overflow-hidden rounded-xl border border-[#2a2a2a]">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-[#181818] text-[#90A4AE]">
+                  <tr><Th>Produto</Th><Th>Qtd</Th><Th>{" "}</Th></tr>
+                </thead>
+                <tbody>
+                  {editandoId
+                    ? itensEdicao.map((it) => (
+                        <tr key={it.id} className="border-t border-[#2a2a2a]">
+                          <Td className="font-semibold">{it.produtoCodigo ? `[${it.produtoCodigo}] ` : ""}{it.produtoNome}</Td>
+                          <Td>{it.quantidade}</Td>
+                          <Td><button type="button" onClick={() => removerItemEdicao(it.id)} className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-red-900/50 text-red-400 hover:bg-red-900/20"><X className="h-3 w-3" /></button></Td>
+                        </tr>
+                      ))
+                    : itensRascunho.map((it) => (
+                        <tr key={it.tempId} className="border-t border-[#2a2a2a]">
+                          <Td className="font-semibold">{it.produtoCodigo ? `[${it.produtoCodigo}] ` : ""}{it.produtoNome}</Td>
+                          <Td>{it.quantidade}</Td>
+                          <Td><button type="button" onClick={() => setItensRascunho((prev) => prev.filter((x) => x.tempId !== it.tempId))} className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-red-900/50 text-red-400 hover:bg-red-900/20"><X className="h-3 w-3" /></button></Td>
+                        </tr>
+                      ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="flex flex-col gap-2">
+            <select value={formItem.produtoId}
+              onChange={(e) => selecionarProdutoItem(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
+              className="h-10 w-full rounded-xl border border-[#333333] bg-[#212121] px-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]">
+              <option value="">Selecionar produto...</option>
+              {produtos.map((p) => (
+                <option key={p.id} value={p.id}>{p.codigo ? `[${p.codigo}] ` : ""}{p.nome}</option>
+              ))}
+            </select>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={formItem.quantidade}
+                onChange={(e) => setFormItem((f) => ({ ...f, quantidade: e.target.value }))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    if (formItem.produtoId && !salvandoItem) {
+                      editandoId ? adicionarItemEdicao(editandoId) : adicionarItemRascunho();
+                    }
+                  }
+                }}
+                placeholder="Qtd"
+                className="h-10 w-24 rounded-xl border border-[#333333] bg-[#212121] px-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+              />
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (editandoId) {
+                    adicionarItemEdicao(editandoId);
+                  } else {
+                    adicionarItemRascunho();
+                  }
+                }}
+                disabled={salvandoItem}
+                className="inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#546E7A] px-4 text-sm font-semibold text-white transition hover:bg-[#455A64] disabled:opacity-50"
+              >
+                <Plus className="h-4 w-4 shrink-0" />
+                {salvandoItem ? "Salvando..." : "Adicionar"}
+              </button>
+            </div>
+          </div>
+          {produtos.length === 0 && (
+            <p className="mt-2 text-xs text-amber-400">Cadastre produtos na aba <strong>Produtos</strong> primeiro.</p>
+          )}
+        </div>
+
+        <div className="mt-5 flex gap-3">
+          <button type="submit" disabled={salvando}
+            className="inline-flex h-11 items-center gap-2 rounded-2xl bg-[#546E7A] px-4 text-sm font-semibold text-white transition hover:bg-[#455A64] disabled:opacity-60">
+            <Save className="h-4 w-4" />{salvando ? "Salvando..." : editandoId ? "Atualizar" : "Cadastrar kit"}
+          </button>
+          {editandoId && (
+            <button type="button" onClick={limparForm}
+              className="inline-flex h-11 items-center gap-2 rounded-2xl border border-[#333333] bg-[#212121] px-4 text-sm font-semibold text-[#546E7A] transition hover:bg-[#2a2a2a]">
+              <X className="h-4 w-4" /> Cancelar
+            </button>
+          )}
+        </div>
+      </form>
+
+      <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h3 className="text-xl font-bold">{kits.length} kit(s)</h3>
+          <div className="relative sm:min-w-56">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#90A4AE]" />
+            <input type="search" value={termoBusca} onChange={(e) => setTermoBusca(e.target.value)}
+              className="h-11 w-full rounded-2xl border border-[#333333] bg-[#141414] pl-11 pr-4 text-sm text-[#ECEFF1] outline-none placeholder:text-[#546E7A] focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+              placeholder="Buscar kit ou produto" />
+          </div>
+        </div>
+        <div className="mt-4 overflow-hidden rounded-3xl border border-[#333333]">
+          {kitsFiltrados.length > 0 ? (
+            <div className="max-h-[600px] overflow-auto">
+              <table className="min-w-[420px] w-full bg-[#212121] text-left text-sm">
+                <thead className="sticky top-0 bg-[#181818] text-[#90A4AE]">
+                  <tr><Th>Kit</Th><Th>Itens</Th><Th>Ações</Th></tr>
+                </thead>
+                <tbody>
+                  {kitsFiltrados.map((k) => (
+                    <tr
+                      key={k.id}
+                      onClick={() => abrirDetalhe(k)}
+                      className={`cursor-pointer border-t border-[#2a2a2a] transition hover:bg-[#2a2a2a] ${editandoId === k.id ? "bg-[#CFD8DC]" : ""}`}
+                    >
+                      <Td className="font-semibold">{k.nome}</Td>
+                      <Td className="text-xs text-[#78909C]">{k.itens.length} produto{k.itens.length === 1 ? "" : "s"}</Td>
+                      <Td>
+                        <div className="flex gap-1">
+                          <button type="button" onClick={(e) => { e.stopPropagation(); iniciarEdicao(k); }}
+                            className="inline-flex h-8 items-center gap-1 rounded-xl border border-[#333333] bg-[#212121] px-2 text-xs font-semibold text-[#546E7A] transition hover:bg-[#2a2a2a]">
+                            <Pencil className="h-3.5 w-3.5" /> Editar
+                          </button>
+                          {isAdmin && (
+                            <button type="button" onClick={(e) => { e.stopPropagation(); handleExcluir(k.id); }}
+                              className="inline-flex h-8 items-center gap-1 rounded-xl border border-red-900/50 bg-red-900/10 px-2 text-xs font-semibold text-red-400 transition hover:bg-red-900/30">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <EstadoTabelaVazia texto="Nenhum kit cadastrado." />
+          )}
+        </div>
+      </div>
+
+      {kitSelecionado && (
+        <Modal
+          titulo={kitSelecionado.nome}
+          subtitulo="Kits"
+          onClose={fecharDetalhe}
+        >
+          <div>
+            {kitSelecionado.descricao && <LinhaDetalhe label="Descrição" valor={kitSelecionado.descricao} />}
+            <p className="mb-2 mt-5 text-sm font-semibold text-[#90A4AE]">Produtos que compõem o kit</p>
+            {kitSelecionado.itens.length > 0 ? (
+              <div className="overflow-auto rounded-xl border border-[#2a2a2a]">
+                <table className="min-w-[320px] w-full text-left text-xs">
+                  <thead className="bg-[#181818] text-[#90A4AE]">
+                    <tr><Th>Produto</Th><Th>Qtd</Th></tr>
+                  </thead>
+                  <tbody>
+                    {kitSelecionado.itens.map((it) => (
+                      <tr key={it.id} className="border-t border-[#2a2a2a]">
+                        <Td className="font-semibold">{it.produtoCodigo ? `[${it.produtoCodigo}] ` : ""}{it.produtoNome}</Td>
+                        <Td>{it.quantidade}</Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="py-3 text-xs text-[#78909C]">Nenhum produto cadastrado para este kit.</p>
             )}
           </div>
 
@@ -2435,20 +3056,23 @@ function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [vendas, setVendas] = useState<Venda[]>([]);
   const [pedidosFabricacao, setPedidosFabricacao] = useState<PedidoFabricacao[]>([]);
+  const [kits, setKits] = useState<Kit[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [termoBusca, setTermoBusca] = useState("");
 
   async function carregar() {
     setCarregando(true);
     const supabase = createClient();
-    const [{ data: prod }, { data: v }, { data: pf }] = await Promise.all([
+    const [{ data: prod }, { data: v }, { data: pf }, { data: kt }] = await Promise.all([
       supabase.from("produtos").select("*").eq("ativo", true).order("nome"),
       supabase.from("vendas").select("*"),
       supabase.from("pedidos_fabricacao").select("*"),
+      supabase.from("kits").select("id, nome, descricao, kit_itens(id, produto_id, quantidade, produtos(nome, codigo))").order("nome"),
     ]);
     setProdutos((prod ?? []).map(mapProduto));
     setVendas((v ?? []).map(mapVenda));
     setPedidosFabricacao((pf ?? []).map(mapPedidoFabricacao));
+    setKits((kt ?? []).map(mapKit));
     setCarregando(false);
   }
 
@@ -2459,13 +3083,21 @@ function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [usuarioId]);
 
+  // Saídas por produto, considerando vendas diretas e o consumo indireto de vendas de kit.
+  const saidasPorProduto: Record<string, number> = {};
+  vendas.forEach((v) => {
+    itensConsumidosPelaVenda(v, kits).forEach((item) => {
+      saidasPorProduto[item.produtoId] = (saidasPorProduto[item.produtoId] ?? 0) + item.quantidade;
+    });
+  });
+
   // Calculate stock per product from movements; unit cost = avg fabrication cost
   const movimentos = produtos.map((p) => {
     const ordens = pedidosFabricacao.filter((pf) => pf.produtoId === p.id);
     const totalCustoFab = ordens.reduce((s, pf) => s + pf.valorTotal, 0);
     const entradas = ordens.reduce((s, pf) => s + pf.qtdFabricada, 0);
     const custoUnitFab = entradas > 0 ? totalCustoFab / entradas : 0;
-    const saidas = vendas.filter((v) => v.produtoId === p.id).reduce((s, v) => s + v.quantidade, 0);
+    const saidas = saidasPorProduto[p.id] ?? 0;
     const saldo = Math.max(0, entradas - saidas);
     return { produto: p, entradas, saidas, saldo, custoUnitFab, capital: saldo * custoUnitFab };
   });
@@ -2478,6 +3110,30 @@ function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
   const capitalTotal = movimentos.reduce((s, m) => s + m.capital, 0);
   const abaixoMinimo = movimentos.filter((m) => m.saldo <= m.produto.estoqueMinimo);
   const totalUnidades = movimentos.reduce((s, m) => s + m.saldo, 0);
+
+  // Quantos kits dá pra montar com o estoque atual: o gargalo é o item com menor saldo relativo à quantidade exigida.
+  const kitsComEstoque = kits.map((kit) => {
+    const quantidadeMontavel = kit.itens.length === 0 ? 0 : Math.min(
+      ...kit.itens.map((it) => {
+        const saldoItem = movimentos.find((m) => m.produto.id === it.produtoId)?.saldo ?? 0;
+        return it.quantidade > 0 ? Math.floor(saldoItem / it.quantidade) : 0;
+      })
+    );
+    return { kit, quantidadeMontavel };
+  });
+
+  const dadosGraficoEstoque = movimentos.map((m) => ({
+    rotulo: m.produto.codigo || truncarRotulo(m.produto.nome, 10),
+    nome: m.produto.nome,
+    saldo: m.saldo,
+    abaixo: m.saldo <= m.produto.estoqueMinimo,
+  }));
+  const dadosGraficoKits = kitsComEstoque.map(({ kit, quantidadeMontavel }) => ({
+    rotulo: truncarRotulo(kit.nome, 10),
+    nome: kit.nome,
+    quantidade: quantidadeMontavel,
+    indisponivel: quantidadeMontavel <= 0,
+  }));
 
   if (carregando) return <EstadoCarregando texto="Carregando estoque..." />;
 
@@ -2493,6 +3149,74 @@ function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
         <KpiCard titulo="Unidades em estoque" valor={String(totalUnidades)} />
         <KpiCard titulo="Abaixo do mínimo" valor={String(abaixoMinimo.length)} alerta={abaixoMinimo.length > 0} />
         <KpiCard titulo="Capital em estoque" valor={formatarMoeda(capitalTotal)} destaque />
+      </div>
+
+      <div className="mt-6 grid gap-5 lg:grid-cols-2">
+        <div className="rounded-3xl border border-[#333333] bg-[#181818] p-4 sm:p-6">
+          <p className="text-sm font-semibold text-[#90A4AE]">Itens avulsos</p>
+          <h3 className="mt-1 text-lg font-bold">Saldo por produto</h3>
+          {dadosGraficoEstoque.length > 0 ? (
+            <div className="mt-4 max-h-80 overflow-y-auto">
+              <div style={{ height: Math.max(dadosGraficoEstoque.length * 34, 120) }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={dadosGraficoEstoque} layout="vertical" barCategoryGap="35%" margin={{ top: 4, right: 24, bottom: 4, left: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" horizontal={false} />
+                    <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: "#78909C" }} axisLine={{ stroke: "#333333" }} tickLine={false} />
+                    <YAxis type="category" dataKey="rotulo" width={64} tick={{ fontSize: 11, fill: "#90A4AE" }} axisLine={{ stroke: "#333333" }} tickLine={false} />
+                    <Tooltip
+                      formatter={(v) => [`${Number(v)} un.`, "Saldo"]}
+                      labelFormatter={(_, payload) => payload?.[0]?.payload?.nome ?? ""}
+                      contentStyle={{ backgroundColor: "#181818", border: "1px solid #333333", borderRadius: 12 }}
+                      labelStyle={{ color: "#ECEFF1", fontWeight: 600, marginBottom: 4 }}
+                      itemStyle={{ color: "#90A4AE" }}
+                      cursor={{ fill: "#2a2a2a" }}
+                    />
+                    <Bar dataKey="saldo" radius={[0, 4, 4, 0]} maxBarSize={20}>
+                      {dadosGraficoEstoque.map((d, i) => (
+                        <Cell key={i} fill={d.abaixo ? "#C62828" : "#1565C0"} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-4 py-10 text-center text-sm text-[#78909C]">Nenhum produto ativo cadastrado.</div>
+          )}
+        </div>
+
+        <div className="rounded-3xl border border-[#333333] bg-[#181818] p-4 sm:p-6">
+          <p className="text-sm font-semibold text-[#90A4AE]">Kits</p>
+          <h3 className="mt-1 text-lg font-bold">Quantidade montável</h3>
+          {dadosGraficoKits.length > 0 ? (
+            <div className="mt-4 max-h-80 overflow-y-auto">
+              <div style={{ height: Math.max(dadosGraficoKits.length * 34, 120) }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={dadosGraficoKits} layout="vertical" barCategoryGap="35%" margin={{ top: 4, right: 24, bottom: 4, left: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" horizontal={false} />
+                    <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: "#78909C" }} axisLine={{ stroke: "#333333" }} tickLine={false} />
+                    <YAxis type="category" dataKey="rotulo" width={90} tick={{ fontSize: 11, fill: "#90A4AE" }} axisLine={{ stroke: "#333333" }} tickLine={false} />
+                    <Tooltip
+                      formatter={(v) => [`${Number(v)} kit(s)`, "Montável"]}
+                      labelFormatter={(_, payload) => payload?.[0]?.payload?.nome ?? ""}
+                      contentStyle={{ backgroundColor: "#181818", border: "1px solid #333333", borderRadius: 12 }}
+                      labelStyle={{ color: "#ECEFF1", fontWeight: 600, marginBottom: 4 }}
+                      itemStyle={{ color: "#90A4AE" }}
+                      cursor={{ fill: "#2a2a2a" }}
+                    />
+                    <Bar dataKey="quantidade" radius={[0, 4, 4, 0]} maxBarSize={20}>
+                      {dadosGraficoKits.map((d, i) => (
+                        <Cell key={i} fill={d.indisponivel ? "#C62828" : "#1565C0"} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-4 py-10 text-center text-sm text-[#78909C]">Nenhum kit cadastrado.</div>
+          )}
+        </div>
       </div>
 
       <div className="mt-5 flex items-center gap-3">
@@ -2579,6 +3303,49 @@ function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
           <EstadoTabelaVazia texto="Nenhum produto ativo cadastrado." />
         )}
       </div>
+
+      {kits.length > 0 && (
+        <div className="mt-8">
+          <p className="text-sm font-semibold text-[#90A4AE]">Kits</p>
+          <h3 className="mt-1 text-xl font-bold">Quantidade montável com o estoque atual</h3>
+          <p className="mt-0.5 text-xs text-[#78909C]">
+            Calculado pelo item do kit com menor saldo disponível em relação à quantidade exigida.
+          </p>
+          <div className="mt-4 overflow-hidden rounded-3xl border border-[#333333]">
+            <div className="overflow-auto">
+              <table className="min-w-[560px] w-full bg-[#212121] text-left text-sm">
+                <thead className="bg-[#181818] text-[#90A4AE]">
+                  <tr>
+                    <Th>Kit</Th>
+                    <Th>Composição</Th>
+                    <Th>Dá pra montar</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {kitsComEstoque.map(({ kit, quantidadeMontavel }) => (
+                    <tr key={kit.id} className={`border-t border-[#2a2a2a] ${quantidadeMontavel <= 0 ? "bg-red-900/10" : ""}`}>
+                      <Td className="font-semibold">{kit.nome}</Td>
+                      <Td className="text-xs text-[#78909C]">
+                        {kit.itens.map((it, i) => (
+                          <span key={it.id}>
+                            {i > 0 && ", "}
+                            {it.quantidade}× {it.produtoNome}
+                          </span>
+                        ))}
+                      </Td>
+                      <Td>
+                        <span className={`font-bold text-base ${quantidadeMontavel <= 0 ? "text-red-600" : "text-[#90A4AE]"}`}>
+                          {quantidadeMontavel}
+                        </span>
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -2594,6 +3361,7 @@ function ComprasModulo({
 }) {
   const [pedidos, setPedidos] = useState<PedidoCompra[]>([]);
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
+  const [usuariosMap, setUsuariosMap] = useState<Record<string, string>>({});
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [aba, setAba] = useState<"pedidos" | "fabricacao">("fabricacao");
@@ -2607,6 +3375,7 @@ function ComprasModulo({
     valorTotal: "",
     observacao: "",
   });
+  const [dividirBalancete, setDividirBalancete] = useState(false);
 
   const [pedidoSelecionado, setPedidoSelecionado] = useState<PedidoCompra | null>(null);
   const [editandoDetalhe, setEditandoDetalhe] = useState(false);
@@ -2623,21 +3392,25 @@ function ComprasModulo({
     let ativo = true;
     async function carregar() {
       const supabase = createClient();
-      const [{ data: p }, { data: f }] = await Promise.all([
+      const [{ data: p }, { data: f }, { data: u }] = await Promise.all([
         supabase
           .from("pedidos_compra")
           .select("*, fornecedores(nome)")
-          
+
           .order("data", { ascending: false }),
         supabase
           .from("fornecedores")
           .select("*")
-          
+
           .order("nome"),
+        supabase.from("usuarios_empresa").select("usuario_id, nome, email"),
       ]);
       if (ativo) {
         setPedidos((p ?? []).map(mapPedidoCompra));
         setFornecedores((f ?? []).map(mapFornecedor));
+        setUsuariosMap(
+          Object.fromEntries((u ?? []).map((m) => [String(m.usuario_id), String(m.nome || m.email || "")]))
+        );
         setCarregando(false);
       }
     }
@@ -2667,18 +3440,46 @@ function ComprasModulo({
       })
       .select("*, fornecedores(nome)")
       .single();
-    setSalvando(false);
-    if (error) { setErro(error.message); return; }
+
+    if (error) { setSalvando(false); setErro(error.message); return; }
     if (data) setPedidos((prev) => [mapPedidoCompra(data), ...prev]);
+
+    const fornecedorNome = fornecedores.find((f) => f.id === formPedido.fornecedorId)?.nome ?? "";
+    const nomeItem = `Compra${fornecedorNome ? ` - ${fornecedorNome}` : ""}`;
+    const valorTotal = parseNumero(formPedido.valorTotal);
+    const avisoBalancete = await lancarCompraNoBalancete({
+      dividir: dividirBalancete,
+      valorTotal,
+      data: formPedido.data,
+      nomeItem,
+      usuarioId,
+      usuariosMap,
+    });
+
+    setSalvando(false);
     setFormPedido({ fornecedorId: "", data: dataHoje, status: "pendente", valorTotal: "", observacao: "" });
-    setMensagem("Pedido de compra registrado.");
+    setDividirBalancete(false);
+    setMensagem(
+      avisoBalancete
+        ? `Pedido de compra registrado. ${avisoBalancete}`
+        : valorTotal > 0
+        ? "Pedido de compra registrado e lançado no balancete."
+        : "Pedido de compra registrado."
+    );
   }
 
   async function handleAtualizarStatusPedido(id: string, status: PedidoCompra["status"]) {
     const supabase = createClient();
-    const { error } = await supabase.from("pedidos_compra").update({ status }).eq("id", id);
+    const atualizadoEm = new Date().toISOString();
+    const { error } = await supabase
+      .from("pedidos_compra")
+      .update({ status, atualizado_por: usuarioId, atualizado_em: atualizadoEm })
+      .eq("id", id);
     if (error) { setErro(error.message); return; }
-    setPedidos((prev) => prev.map((p) => (p.id === id ? { ...p, status } : p)));
+    setPedidos((prev) => prev.map((p) => (p.id === id ? { ...p, status, atualizadoPor: usuarioId, atualizadoEm } : p)));
+    if (pedidoSelecionado?.id === id) {
+      setPedidoSelecionado((sel) => sel && { ...sel, status, atualizadoPor: usuarioId, atualizadoEm });
+    }
     setMensagem("Status atualizado.");
   }
 
@@ -2718,12 +3519,15 @@ function ComprasModulo({
     setErro("");
     const supabase = createClient();
     const fornecedor = fornecedores.find((f) => f.id === formDetalhe.fornecedorId);
+    const atualizadoEm = new Date().toISOString();
     const payload = {
       fornecedor_id: formDetalhe.fornecedorId,
       data: formDetalhe.data,
       status: formDetalhe.status,
       valor_total: parseNumero(formDetalhe.valorTotal),
       observacao: formDetalhe.observacao.trim(),
+      atualizado_por: usuarioId,
+      atualizado_em: atualizadoEm,
     };
     const { error } = await supabase.from("pedidos_compra").update(payload).eq("id", pedidoSelecionado.id);
     setSalvandoDetalhe(false);
@@ -2737,6 +3541,8 @@ function ComprasModulo({
       status: payload.status,
       valorTotal: payload.valor_total,
       observacao: payload.observacao,
+      atualizadoPor: usuarioId,
+      atualizadoEm,
     };
     setPedidos((prev) => prev.map((p) => p.id === pedidoSelecionado.id ? pedidoAtualizado : p));
     setPedidoSelecionado(pedidoAtualizado);
@@ -2821,6 +3627,29 @@ function ComprasModulo({
               <CampoCadastro label="Valor total" value={formPedido.valorTotal} onChange={(v) => setFormPedido((f) => ({ ...f, valorTotal: v }))} placeholder="0,00" />
               <CampoCadastro label="Observação" value={formPedido.observacao} onChange={(v) => setFormPedido((f) => ({ ...f, observacao: v }))} placeholder="Detalhes do pedido" />
             </div>
+
+            <button
+              type="button"
+              onClick={() => setDividirBalancete((v) => !v)}
+              className={`mt-4 flex w-full items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-left transition ${
+                dividirBalancete
+                  ? "border-[#546E7A] bg-[#546E7A]/15"
+                  : "border-[#333333] bg-[#212121] hover:bg-[#2a2a2a]"
+              }`}
+            >
+              <span>
+                <span className="block text-sm font-semibold text-[#ECEFF1]">Dividir no balancete entre os sócios</span>
+                <span className="mt-0.5 block text-xs text-[#78909C]">
+                  {dividirBalancete
+                    ? "Ligado: lança metade do valor pra Matheus e metade pra Enyo."
+                    : "Desligado: lança o valor integral no balancete pra quem estiver registrando."}
+                </span>
+              </span>
+              <span className={`relative h-6 w-11 shrink-0 rounded-full transition ${dividirBalancete ? "bg-[#546E7A]" : "bg-[#333333]"}`}>
+                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${dividirBalancete ? "left-5" : "left-0.5"}`} />
+              </span>
+            </button>
+
             <button
               type="submit"
               disabled={salvando}
@@ -2841,6 +3670,7 @@ function ComprasModulo({
                       <Th>Fornecedor</Th>
                       <Th>Valor</Th>
                       <Th>Status</Th>
+                      <Th>Lançado por</Th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2871,6 +3701,7 @@ function ComprasModulo({
                             <option value="cancelado">Cancelado</option>
                           </select>
                         </Td>
+                        <Td className="text-xs text-[#78909C]">{nomeUsuario(usuariosMap, p.criadoPor)}</Td>
                       </tr>
                     ))}
                   </tbody>
@@ -2888,6 +3719,7 @@ function ComprasModulo({
           usuarioId={usuarioId}
           dataHoje={dataHoje}
           fornecedores={fornecedores}
+          usuariosMap={usuariosMap}
         />
       )}
 
@@ -2938,6 +3770,13 @@ function ComprasModulo({
               />
               <LinhaDetalhe label="Valor total" valor={formatarMoeda(pedidoSelecionado.valorTotal)} destaque />
               {pedidoSelecionado.observacao && <LinhaDetalhe label="Observação" valor={pedidoSelecionado.observacao} />}
+              <HistoricoRegistro
+                usuariosMap={usuariosMap}
+                criadoPor={pedidoSelecionado.criadoPor}
+                criadoEm={pedidoSelecionado.criadoEm}
+                atualizadoPor={pedidoSelecionado.atualizadoPor}
+                atualizadoEm={pedidoSelecionado.atualizadoEm}
+              />
             </div>
           )}
           <ModalAcoes
@@ -2960,10 +3799,12 @@ function FabricacaoSubModulo({
   usuarioId,
   dataHoje,
   fornecedores,
+  usuariosMap,
 }: {
   usuarioId: string;
   dataHoje: string;
   fornecedores: Fornecedor[];
+  usuariosMap: Record<string, string>;
 }) {
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [pedidos, setPedidos] = useState<PedidoFabricacao[]>([]);
@@ -3296,6 +4137,7 @@ function FabricacaoSubModulo({
                     <Th>Produto</Th>
                     <Th>Qtd fabricada</Th>
                     <Th>Custo total</Th>
+                    <Th>Lançado por</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3309,6 +4151,7 @@ function FabricacaoSubModulo({
                       <Td className="font-semibold">{p.produtoNome}</Td>
                       <Td>{p.qtdFabricada}</Td>
                       <Td className="font-semibold text-[#90A4AE]">{formatarMoeda(p.valorTotal)}</Td>
+                      <Td className="text-xs text-[#78909C]">{nomeUsuario(usuariosMap, p.criadoPor)}</Td>
                     </tr>
                   ))}
                 </tbody>
@@ -4171,6 +5014,38 @@ function LinhaDetalhe({
   );
 }
 
+function HistoricoRegistro({
+  usuariosMap,
+  criadoPor,
+  criadoEm,
+  atualizadoPor,
+  atualizadoEm,
+}: {
+  usuariosMap: Record<string, string>;
+  criadoPor: string;
+  criadoEm: string;
+  atualizadoPor: string;
+  atualizadoEm: string;
+}) {
+  if (!criadoPor && !atualizadoPor) return null;
+  return (
+    <div className="mt-3 border-t border-[#2a2a2a] pt-3 text-xs text-[#78909C]">
+      {criadoPor && (
+        <p>
+          Lançado por <span className="font-semibold text-[#90A4AE]">{nomeUsuario(usuariosMap, criadoPor)}</span>
+          {criadoEm && ` em ${formatarDataHora(criadoEm)}`}
+        </p>
+      )}
+      {atualizadoPor && (
+        <p className="mt-1">
+          Última edição por <span className="font-semibold text-[#90A4AE]">{nomeUsuario(usuariosMap, atualizadoPor)}</span>
+          {atualizadoEm && ` em ${formatarDataHora(atualizadoEm)}`}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function ModalAcoes({
   editando,
   salvando,
@@ -4256,6 +5131,28 @@ function mapComponente(r: any): ComponenteProduto {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapKitItem(it: any): KitItem {
+  return {
+    id: String(it.id),
+    produtoId: String(it.produto_id ?? ""),
+    produtoNome: String(it.produtos?.nome ?? ""),
+    produtoCodigo: String(it.produtos?.codigo ?? ""),
+    quantidade: Number(it.quantidade ?? 1),
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapKit(r: any): Kit {
+  const itensRaw = Array.isArray(r.kit_itens) ? r.kit_itens : [];
+  return {
+    id: String(r.id),
+    nome: String(r.nome ?? ""),
+    descricao: String(r.descricao ?? ""),
+    itens: itensRaw.map(mapKitItem),
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapPedidoFabricacao(r: any): PedidoFabricacao {
   return {
     id: String(r.id),
@@ -4265,6 +5162,7 @@ function mapPedidoFabricacao(r: any): PedidoFabricacao {
     data: String(r.data ?? ""),
     valorTotal: Number(r.valor_total ?? 0),
     observacao: String(r.observacao ?? ""),
+    criadoPor: String(r.criado_por ?? ""),
   };
 }
 
@@ -4302,11 +5200,16 @@ function mapVenda(r: any): Venda {
     marketplace: String(r.marketplace ?? "Outro") as Marketplace,
     produtoId: String(r.produto_id ?? ""),
     produtoNome: String(r.produto_nome ?? ""),
+    kitId: String(r.kit_id ?? ""),
     quantidade: Number(r.quantidade ?? 0),
     valorUnitario: Number(r.valor_unitario ?? 0),
     taxaMarketplace: Number(r.taxa_marketplace ?? 0),
     desconto: Number(r.desconto ?? 0),
     observacao: String(r.observacao ?? ""),
+    criadoPor: String(r.criado_por ?? ""),
+    criadoEm: String(r.criado_em ?? ""),
+    atualizadoPor: String(r.atualizado_por ?? ""),
+    atualizadoEm: String(r.atualizado_em ?? ""),
   };
 }
 
@@ -4380,6 +5283,10 @@ function mapPedidoCompra(r: any): PedidoCompra {
     status: (r.status ?? "pendente") as PedidoCompra["status"],
     valorTotal: Number(r.valor_total ?? 0),
     observacao: String(r.observacao ?? ""),
+    criadoPor: String(r.criado_por ?? ""),
+    criadoEm: String(r.criado_em ?? ""),
+    atualizadoPor: String(r.atualizado_por ?? ""),
+    atualizadoEm: String(r.atualizado_em ?? ""),
   };
 }
 
