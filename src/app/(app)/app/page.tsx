@@ -5,10 +5,16 @@ import {
   ArrowRight,
   BarChart3,
   Boxes,
+  Calculator,
+  ClipboardList,
   DollarSign,
+  FileText,
+  Layers,
   PackagePlus,
+  Ruler,
   Scale,
   ShoppingCart,
+  SquareStack,
   TrendingUp,
 } from "lucide-react";
 import LogoutButton from "@/components/auth/logout-button";
@@ -220,6 +226,98 @@ export default async function AppPage() {
                 className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-[#333333] bg-[#181818] px-4 text-sm font-semibold text-[#90A4AE] transition hover:bg-[#2a2a2a]"
               >
                 Ver estoque
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
+          </article>
+
+          {/* Orçamentos */}
+          <article className="flex flex-col rounded-3xl border border-[#333333] bg-[#212121] p-5 shadow-sm sm:p-6">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#546E7A]/20 text-[#90A4AE]">
+              <FileText className="h-5 w-5" />
+            </div>
+            <p className="mt-5 text-sm font-semibold text-[#90A4AE]">
+              Comercial
+            </p>
+            <h2 className="mt-1 text-xl font-bold">Orçamentos</h2>
+            <p className="mt-2 text-sm leading-6 text-[#78909C]">
+              Monte propostas comerciais e de engenharia item a item e gere a
+              folha de orçamento em PDF pra enviar ao cliente.
+            </p>
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              {(
+                [
+                  ["Clientes", ClipboardList],
+                  ["Itens", Boxes],
+                  ["PDF", FileText],
+                  ["Status", Scale],
+                ] as const
+              ).map(([label, Icon]) => (
+                <div
+                  key={label}
+                  className="flex items-center gap-2 rounded-2xl border border-[#2a2a2a] bg-[#181818] px-3 py-2"
+                >
+                  <Icon className="h-4 w-4 shrink-0 text-[#90A4AE]" />
+                  <p className="text-xs font-semibold text-[#ECEFF1]">
+                    {label}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-auto pt-5">
+              <Link
+                href="/orcamentos"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-[#546E7A] px-4 text-sm font-semibold text-white transition hover:bg-[#455A64]"
+              >
+                Acessar orçamentos
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
+          </article>
+
+          {/* Calculadora de custos */}
+          <article className="flex flex-col rounded-3xl border border-[#333333] bg-[#212121] p-5 shadow-sm sm:p-6">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#546E7A]/20 text-[#90A4AE]">
+              <Calculator className="h-5 w-5" />
+            </div>
+            <p className="mt-5 text-sm font-semibold text-[#90A4AE]">
+              Comercial
+            </p>
+            <h2 className="mt-1 text-xl font-bold">Calculadora de Custos</h2>
+            <p className="mt-2 text-sm leading-6 text-[#78909C]">
+              Precifique chapa (DXF), tubos/perfis e a composição final de uma
+              peça, com parâmetros de mercado editáveis.
+            </p>
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              {(
+                [
+                  ["Chapa DXF", Layers],
+                  ["Perfis", Ruler],
+                  ["Composição", SquareStack],
+                  ["Parâmetros", Boxes],
+                ] as const
+              ).map(([label, Icon]) => (
+                <div
+                  key={label}
+                  className="flex items-center gap-2 rounded-2xl border border-[#2a2a2a] bg-[#181818] px-3 py-2"
+                >
+                  <Icon className="h-4 w-4 shrink-0 text-[#90A4AE]" />
+                  <p className="text-xs font-semibold text-[#ECEFF1]">
+                    {label}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-auto pt-5">
+              <Link
+                href="/calculadora"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-[#333333] bg-[#181818] px-4 text-sm font-semibold text-[#90A4AE] transition hover:bg-[#2a2a2a]"
+              >
+                Acessar calculadora
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </div>

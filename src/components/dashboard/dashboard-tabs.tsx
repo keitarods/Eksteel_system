@@ -3820,6 +3820,7 @@ function FabricacaoSubModulo({
   const [itens, setItens] = useState<ItemFabricacaoRascunho[]>([]);
   const [componentesCarregados, setComponentesCarregados] = useState(false);
   const [carregandoComp, setCarregandoComp] = useState(false);
+  const [dividirBalancete, setDividirBalancete] = useState(false);
 
   const [pedidoSelecionado, setPedidoSelecionado] = useState<PedidoFabricacao | null>(null);
   const [itensDetalhe, setItensDetalhe] = useState<ItemFabricacao[]>([]);
@@ -3945,13 +3946,30 @@ function FabricacaoSubModulo({
       ));
     }
 
+    const nomeItemBalancete = `Fabricação${produto?.nome ? ` - ${produto.nome}` : ""}`;
+    const avisoBalancete = await lancarCompraNoBalancete({
+      dividir: dividirBalancete,
+      valorTotal: valorTotalGeral,
+      data: dataFab,
+      nomeItem: nomeItemBalancete,
+      usuarioId,
+      usuariosMap,
+    });
+
     setProdutoId("");
     setQtdFabricada("1");
     setDataFab(dataHoje);
     setObservacao("");
     setItens([]);
     setComponentesCarregados(false);
-    setMensagem("Pedido de fabricação registrado.");
+    setDividirBalancete(false);
+    setMensagem(
+      avisoBalancete
+        ? `Pedido de fabricação registrado. ${avisoBalancete}`
+        : valorTotalGeral > 0
+        ? "Pedido de fabricação registrado e lançado no balancete."
+        : "Pedido de fabricação registrado."
+    );
   }
 
   async function abrirDetalhePedido(pedido: PedidoFabricacao) {
@@ -4103,6 +4121,28 @@ function FabricacaoSubModulo({
                 </tbody>
               </table>
             </div>
+
+            <button
+              type="button"
+              onClick={() => setDividirBalancete((v) => !v)}
+              className={`mt-4 flex w-full items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-left transition ${
+                dividirBalancete
+                  ? "border-[#546E7A] bg-[#546E7A]/15"
+                  : "border-[#333333] bg-[#212121] hover:bg-[#2a2a2a]"
+              }`}
+            >
+              <span>
+                <span className="block text-sm font-semibold text-[#ECEFF1]">Dividir no balancete entre os sócios</span>
+                <span className="mt-0.5 block text-xs text-[#78909C]">
+                  {dividirBalancete
+                    ? "Ligado: lança metade do custo pra Matheus e metade pra Enyo."
+                    : "Desligado: lança o custo integral no balancete pra quem estiver registrando."}
+                </span>
+              </span>
+              <span className={`relative h-6 w-11 shrink-0 rounded-full transition ${dividirBalancete ? "bg-[#546E7A]" : "bg-[#333333]"}`}>
+                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${dividirBalancete ? "left-5" : "left-0.5"}`} />
+              </span>
+            </button>
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
               <p className="text-sm font-semibold">
