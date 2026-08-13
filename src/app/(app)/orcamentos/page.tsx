@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowLeft, Plus } from "lucide-react";
+import { ArrowLeft, Plus, Settings } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { listarOrcamentos } from "@/lib/orcamentos/queries";
 import { mapClienteOrcamento } from "@/lib/orcamentos/types";
@@ -42,13 +42,22 @@ export default async function OrcamentosPage() {
               Monte propostas item a item e gere a folha de orçamento em PDF pronta pra enviar ao cliente.
             </p>
           </div>
-          <Link
-            href="/orcamentos/novo"
-            className="inline-flex h-11 shrink-0 items-center gap-2 rounded-2xl bg-[#546E7A] px-5 text-sm font-semibold text-white transition hover:bg-[#455A64]"
-          >
-            <Plus className="h-4 w-4" />
-            Novo orçamento
-          </Link>
+          <div className="flex shrink-0 gap-2">
+            <Link
+              href="/orcamentos/configuracoes"
+              className="inline-flex h-11 items-center gap-2 rounded-2xl border border-[#333333] bg-[#212121] px-4 text-sm font-semibold text-[#90A4AE] transition hover:bg-[#2a2a2a]"
+            >
+              <Settings className="h-4 w-4" />
+              Dados da empresa
+            </Link>
+            <Link
+              href="/orcamentos/novo"
+              className="inline-flex h-11 items-center gap-2 rounded-2xl bg-[#546E7A] px-5 text-sm font-semibold text-white transition hover:bg-[#455A64]"
+            >
+              <Plus className="h-4 w-4" />
+              Novo orçamento
+            </Link>
+          </div>
         </div>
 
         <div className="mt-6 rounded-3xl border border-[#333333] bg-[#212121] p-4 shadow-sm sm:p-6">

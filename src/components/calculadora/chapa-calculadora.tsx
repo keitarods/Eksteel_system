@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { calcularGeometriaDxf, contornosParaSvg } from "@/lib/calculo-custo/geometria";
 import { calcularCustoMaterial, calcularPesoPeca } from "@/lib/calculo-custo/material";
 import { calcularCustoCorte, calcularTempoCorteMin, estimarVelocidadeCorte } from "@/lib/calculo-custo/laser";
+import { calcularCustoDobra } from "@/lib/calculo-custo/dobra";
 import {
   MATERIAIS,
   POTENCIAS_LASER_KW,
@@ -18,6 +19,13 @@ import type { ResultadoGeometria } from "@/lib/calculo-custo/types";
 import { Botao, Campo, Cartao, FeedbackBloco, SelectCampo, Th, Td } from "@/components/orcamentos/ui";
 import AdicionarAoOrcamentoBotao from "./adicionar-ao-orcamento-botao";
 
+type Processo = "corte" | "corte_dobra";
+
+const PROCESSOS: { valor: Processo; label: string }[] = [
+  { valor: "corte", label: "Só corte a laser" },
+  { valor: "corte_dobra", label: "Corte + dobra" },
+];
+
 type PecaLote = {
   id: string;
   nomeArquivo: string;
@@ -27,10 +35,13 @@ type PecaLote = {
   espessuraMm: string;
   potenciaKw: number;
   quantidade: string;
+  processo: Processo;
+  numeroDobras: string;
   pesoKg: number;
   custoMaterial: number;
   tempoCorteMin: number;
   custoCorte: number;
+  custoDobra: number;
   custoUnitario: number;
   custoTotal: number;
 };
@@ -49,6 +60,8 @@ export default function ChapaCalculadora({
   const [espessuraMm, setEspessuraMm] = useState("3");
   const [potenciaKw, setPotenciaKw] = useState<number>(3);
   const [quantidade, setQuantidade] = useState("1");
+  const [processo, setProcesso] = useState<Processo>("corte");
+  const [numeroDobras, setNumeroDobras] = useState("0");
   const [erro, setErro] = useState("");
   const [mensagem, setMensagem] = useState("");
   const [lote, setLote] = useState<PecaLote[]>([]);
@@ -73,6 +86,15 @@ export default function ChapaCalculadora({
       }
       const svg = contornosParaSvg(resultado.contornos, { larguraPx: 360 });
       setArquivoAtual({ nome: arquivo.name, resultado, svg });
+      // Sugestão a partir da camada do DXF (se o CAD exportou linhas de dobra
+      // separadas) — só pré-preenche o campo, o processo continua "só corte" até
+      // você escolher manualmente, e o número é sempre editável.
+      if (resultado.dobrasDetectadas > 0) {
+        setNumeroDobras(String(resultado.dobrasDetectadas));
+        setMensagem(`Detectei ${resultado.dobrasDetectadas} linha(s) numa camada de dobra do DXF — conferi e ajustei o número de dobras abaixo se precisar.`);
+      } else {
+        setNumeroDobras("0");
+      }
     } catch (err) {
       setErro(err instanceof Error ? err.message : "Erro ao ler o arquivo DXF.");
     }
@@ -85,6 +107,7 @@ export default function ChapaCalculadora({
     const densidadeKgM3 = parametros[densidade]?.valor ?? 0;
     const horaLaser = parametros["hora_maquina_laser"]?.valor ?? 0;
     const gasHora = parametros["custo_gas_corte_hora"]?.valor ?? 0;
+    const valorPorDobra = parametros["valor_por_dobra"]?.valor ?? 0;
 
     const areaM2 = arquivoAtual.resultado.areaMm2 / 1e6;
     const perimetroM = arquivoAtual.resultado.perimetroMm / 1000;
@@ -98,16 +121,21 @@ export default function ChapaCalculadora({
     const tempoCorteMin = calcularTempoCorteMin(perimetroM, velocidade);
     const custoCorte = calcularCustoCorte(tempoCorteMin, horaLaser, gasHora);
 
-    const custoUnitario = custoMaterial + custoCorte;
+    const custoDobra = processo === "corte_dobra" ? calcularCustoDobra(parseNumero(numeroDobras), valorPorDobra) : 0;
+
+    const custoUnitario = custoMaterial + custoCorte + custoDobra;
     return {
       material,
       espessuraMm,
       potenciaKw,
       quantidade,
+      processo,
+      numeroDobras,
       pesoKg,
       custoMaterial,
       tempoCorteMin,
       custoCorte,
+      custoDobra,
       custoUnitario,
       custoTotal: custoUnitario * qtd,
     };
@@ -123,6 +151,8 @@ export default function ChapaCalculadora({
     ]);
     setArquivoAtual(null);
     setQuantidade("1");
+    setProcesso("corte");
+    setNumeroDobras("0");
   }
 
   function removerDoLote(id: string) {
@@ -145,6 +175,8 @@ export default function ChapaCalculadora({
       tempo_corte_min: peca.tempoCorteMin,
       custo_material: peca.custoMaterial,
       custo_corte: peca.custoCorte,
+      numero_dobras: peca.processo === "corte_dobra" ? parseNumero(peca.numeroDobras) : 0,
+      custo_dobra: peca.custoDobra,
       custo_total: peca.custoUnitario,
       quantidade: parseNumero(peca.quantidade) || 1,
       svg_preview: peca.svg,
@@ -174,6 +206,21 @@ export default function ChapaCalculadora({
               dangerouslySetInnerHTML={{ __html: arquivoAtual.svg }}
             />
             <div>
+              <div className="mb-3 flex gap-2 rounded-2xl border border-[#333333] bg-[#181818] p-1.5 self-start">
+                {PROCESSOS.map((p) => (
+                  <button
+                    key={p.valor}
+                    type="button"
+                    onClick={() => setProcesso(p.valor)}
+                    className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                      processo === p.valor ? "bg-[#546E7A] text-white" : "text-[#90A4AE] hover:bg-[#2a2a2a]"
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+
               <div className="grid gap-3 sm:grid-cols-2">
                 <SelectCampo
                   label="Material"
@@ -189,6 +236,9 @@ export default function ChapaCalculadora({
                   options={POTENCIAS_LASER_KW.map((p) => ({ valor: String(p), label: `${p}kW` }))}
                 />
                 <Campo label="Quantidade" value={quantidade} onChange={setQuantidade} />
+                {processo === "corte_dobra" && (
+                  <Campo label="Número de dobras" value={numeroDobras} onChange={setNumeroDobras} />
+                )}
               </div>
 
               <div className="mt-4 grid grid-cols-2 gap-3 rounded-2xl border border-[#2a2a2a] bg-[#141414] p-3 text-sm sm:grid-cols-4">
@@ -199,6 +249,15 @@ export default function ChapaCalculadora({
               </div>
 
               <p className="mt-3 text-sm">
+                Material: <span className="font-semibold text-[#90A4AE]">{previaPeca.custoMaterial.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
+                {" · "}Corte: <span className="font-semibold text-[#90A4AE]">{previaPeca.custoCorte.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
+                {processo === "corte_dobra" && (
+                  <>
+                    {" · "}Dobra: <span className="font-semibold text-[#90A4AE]">{previaPeca.custoDobra.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
+                  </>
+                )}
+              </p>
+              <p className="mt-1 text-sm">
                 Custo por peça: <span className="font-semibold text-[#90A4AE]">
                   {previaPeca.custoUnitario.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
                 </span>
@@ -219,12 +278,13 @@ export default function ChapaCalculadora({
         <Cartao>
           <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Lote ({lote.length} peça{lote.length === 1 ? "" : "s"})</p>
           <div className="overflow-x-auto rounded-2xl border border-[#2a2a2a]">
-            <table className="w-full min-w-[760px] text-left text-sm">
+            <table className="w-full min-w-[820px] text-left text-sm">
               <thead className="bg-[#181818] text-[#90A4AE]">
                 <tr>
                   <Th>Arquivo</Th>
                   <Th>Material</Th>
                   <Th>Esp.</Th>
+                  <Th>Processo</Th>
                   <Th>Qtd.</Th>
                   <Th>Peso un.</Th>
                   <Th>Custo un.</Th>
@@ -238,6 +298,9 @@ export default function ChapaCalculadora({
                     <Td className="font-semibold">{p.nomeArquivo}</Td>
                     <Td>{MATERIAIS.find((m) => m.valor === p.material)?.label}</Td>
                     <Td>{p.espessuraMm}mm</Td>
+                    <Td className="text-xs text-[#78909C]">
+                      {p.processo === "corte_dobra" ? `Corte + ${p.numeroDobras} dobra(s)` : "Só corte"}
+                    </Td>
                     <Td>{p.quantidade}</Td>
                     <Td>{p.pesoKg.toFixed(3)}kg</Td>
                     <Td>{p.custoUnitario.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</Td>
@@ -257,8 +320,8 @@ export default function ChapaCalculadora({
                         <AdicionarAoOrcamentoBotao
                           usuarioId={usuarioId}
                           tipoItem="produto"
-                          descricao={`Chapa cortada a laser — ${p.nomeArquivo}`}
-                          detalhamentoTecnico={`Material: ${MATERIAIS.find((m) => m.valor === p.material)?.label}, espessura ${p.espessuraMm}mm. Peso ${p.pesoKg.toFixed(3)}kg/un. Área ${(p.resultado.areaMm2 / 1e6).toFixed(4)}m², perímetro ${(p.resultado.perimetroMm / 1000).toFixed(3)}m. Tempo de corte estimado ${p.tempoCorteMin.toFixed(1)}min (laser ${p.potenciaKw}kW).`}
+                          descricao={`Chapa ${p.processo === "corte_dobra" ? "cortada e dobrada" : "cortada a laser"} — ${p.nomeArquivo}`}
+                          detalhamentoTecnico={`Material: ${MATERIAIS.find((m) => m.valor === p.material)?.label}, espessura ${p.espessuraMm}mm. Peso ${p.pesoKg.toFixed(3)}kg/un. Área ${(p.resultado.areaMm2 / 1e6).toFixed(4)}m², perímetro ${(p.resultado.perimetroMm / 1000).toFixed(3)}m. Tempo de corte estimado ${p.tempoCorteMin.toFixed(1)}min (laser ${p.potenciaKw}kW).${p.processo === "corte_dobra" ? ` ${p.numeroDobras} dobra(s).` : ""}`}
                           quantidade={parseNumero(p.quantidade) || 1}
                           valorUnitario={p.custoUnitario}
                         />

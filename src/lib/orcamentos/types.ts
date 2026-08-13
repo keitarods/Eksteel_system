@@ -54,6 +54,8 @@ export type Orcamento = {
   prazoEntrega: string;
   observacoes: string;
   responsavelTecnico: string;
+  cnpjEmissor: string;
+  cnpjEmissorLabel: string;
   subtotal: number;
   desconto: number;
   total: number;
@@ -110,6 +112,8 @@ export function mapOrcamento(r: any): Orcamento {
     prazoEntrega: String(r.prazo_entrega ?? ""),
     observacoes: String(r.observacoes ?? ""),
     responsavelTecnico: String(r.responsavel_tecnico ?? ""),
+    cnpjEmissor: String(r.cnpj_emissor ?? ""),
+    cnpjEmissorLabel: String(r.cnpj_emissor_label ?? ""),
     subtotal: Number(r.subtotal ?? 0),
     desconto: Number(r.desconto ?? 0),
     total: Number(r.total ?? 0),

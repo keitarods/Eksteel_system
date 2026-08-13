@@ -33,6 +33,8 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       prazo_entrega: orcamento.prazoEntrega,
       observacoes: orcamento.observacoes,
       responsavel_tecnico: orcamento.responsavelTecnico,
+      cnpj_emissor: orcamento.cnpjEmissor,
+      cnpj_emissor_label: orcamento.cnpjEmissorLabel,
       subtotal: orcamento.subtotal,
       desconto: orcamento.desconto,
       total: orcamento.total,

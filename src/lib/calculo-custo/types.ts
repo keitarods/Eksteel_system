@@ -8,6 +8,8 @@ export type ResultadoGeometria = {
   bbox: { larguraMm: number; alturaMm: number };
   contornos: Contorno[];
   furos: number;
+  // Sugestão heurística (camada do DXF), não uma leitura garantida — ver geometria/dobras.ts.
+  dobrasDetectadas: number;
 };
 
 export const MATERIAIS = [

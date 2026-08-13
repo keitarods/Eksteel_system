@@ -4,6 +4,7 @@ import { renderToBuffer } from "@react-pdf/renderer";
 import { createClient } from "@/lib/supabase/server";
 import { buscarOrcamentoCompleto } from "@/lib/orcamentos/queries";
 import { mapClienteOrcamento } from "@/lib/orcamentos/types";
+import { buscarEmpresaConfig } from "@/lib/orcamentos/empresa";
 import OrcamentoPdfDocument from "@/components/orcamentos/orcamento-pdf-document";
 
 export const runtime = "nodejs";
@@ -24,11 +25,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: "Orçamento não encontrado." }, { status: 404 });
   }
 
-  const { data: clienteRaw } = await supabase
-    .from("clientes_orcamento")
-    .select("*")
-    .eq("id", resultado.orcamento.clienteId)
-    .maybeSingle();
+  const [{ data: clienteRaw }, empresa] = await Promise.all([
+    supabase.from("clientes_orcamento").select("*").eq("id", resultado.orcamento.clienteId).maybeSingle(),
+    buscarEmpresaConfig(supabase),
+  ]);
 
   const logoSrc = path.join(process.cwd(), "public", "images", "Eksteel-logo.png");
 
@@ -37,6 +37,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       orcamento={resultado.orcamento}
       itens={resultado.itens}
       cliente={clienteRaw ? mapClienteOrcamento(clienteRaw) : null}
+      empresa={empresa}
       logoSrc={logoSrc}
     />
   );

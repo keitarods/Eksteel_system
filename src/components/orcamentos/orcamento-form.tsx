@@ -11,6 +11,7 @@ import {
   type OrcamentoItem,
   type TipoOrcamento,
 } from "@/lib/orcamentos/types";
+import type { EmpresaCnpj } from "@/lib/orcamentos/empresa";
 import { calcularSubtotal, calcularTotal, parseNumero } from "@/lib/orcamentos/calculos";
 import { Campo, CampoTextarea, SelectCampo, Botao, FeedbackBloco } from "./ui";
 import ClientePicker from "./cliente-picker";
@@ -32,6 +33,7 @@ export default function OrcamentoForm({
   usuarioId,
   dataHoje,
   clientesIniciais,
+  cnpjsDisponiveis,
   orcamentoExistente,
   itensExistentes,
   onCancelar,
@@ -40,6 +42,7 @@ export default function OrcamentoForm({
   usuarioId: string;
   dataHoje: string;
   clientesIniciais: ClienteOrcamento[];
+  cnpjsDisponiveis: EmpresaCnpj[];
   orcamentoExistente?: Orcamento;
   itensExistentes?: OrcamentoItem[];
   onCancelar?: () => void;
@@ -60,6 +63,9 @@ export default function OrcamentoForm({
   const [condicoesPagamento, setCondicoesPagamento] = useState(orcamentoExistente?.condicoesPagamento ?? "");
   const [prazoEntrega, setPrazoEntrega] = useState(orcamentoExistente?.prazoEntrega ?? "");
   const [responsavelTecnico, setResponsavelTecnico] = useState(orcamentoExistente?.responsavelTecnico ?? "");
+  const [cnpjEmissorId, setCnpjEmissorId] = useState(
+    cnpjsDisponiveis.find((c) => c.label === orcamentoExistente?.cnpjEmissorLabel)?.id ?? ""
+  );
   const [observacoes, setObservacoes] = useState(orcamentoExistente?.observacoes ?? "");
   const [desconto, setDesconto] = useState(
     orcamentoExistente ? String(orcamentoExistente.desconto).replace(".", ",") : "0"
@@ -93,6 +99,8 @@ export default function OrcamentoForm({
     setSalvando(true);
     const supabase = createClient();
 
+    const cnpjSelecionado = cnpjsDisponiveis.find((c) => c.id === cnpjEmissorId);
+
     const payload = {
       cliente_id: clienteId,
       tipo,
@@ -102,6 +110,8 @@ export default function OrcamentoForm({
       prazo_entrega: prazoEntrega.trim(),
       observacoes: observacoes.trim(),
       responsavel_tecnico: responsavelTecnico.trim(),
+      cnpj_emissor: cnpjSelecionado?.cnpj ?? "",
+      cnpj_emissor_label: cnpjSelecionado?.label ?? "",
       subtotal,
       desconto: parseNumero(desconto),
       total,
@@ -140,7 +150,23 @@ export default function OrcamentoForm({
 
       setMensagem("Orçamento atualizado.");
       const clienteNome = clientes.find((c) => c.id === clienteId)?.nome ?? orcamentoExistente.clienteNome;
-      const atualizado: Orcamento = { ...orcamentoExistente, ...payload, tipo: tipo as TipoOrcamento, clienteNome };
+      const atualizado: Orcamento = {
+        ...orcamentoExistente,
+        clienteId,
+        clienteNome,
+        tipo: tipo as TipoOrcamento,
+        dataEmissao,
+        validadeDias: payload.validade_dias,
+        condicoesPagamento: payload.condicoes_pagamento,
+        prazoEntrega: payload.prazo_entrega,
+        observacoes: payload.observacoes,
+        responsavelTecnico: payload.responsavel_tecnico,
+        cnpjEmissor: payload.cnpj_emissor,
+        cnpjEmissorLabel: payload.cnpj_emissor_label,
+        subtotal,
+        desconto: payload.desconto,
+        total,
+      };
       if (onSalvo) onSalvo(atualizado);
       router.refresh();
       return;
@@ -174,12 +200,23 @@ export default function OrcamentoForm({
             clienteId={clienteId}
             onSelecionar={setClienteId}
             onClienteCriado={(c) => setClientes((prev) => [c, ...prev])}
+            onClienteExcluido={(id) => {
+              setClientes((prev) => prev.filter((c) => c.id !== id));
+              setClienteId((atual) => (atual === id ? "" : atual));
+            }}
           />
         </div>
         <SelectCampo label="Tipo de orçamento" value={tipo} onChange={(v) => setTipo(v as TipoOrcamento)} options={TIPOS_ORCAMENTO.map((t) => ({ valor: t.valor, label: t.label }))} />
         <Campo label="Data de emissão" type="date" value={dataEmissao} onChange={setDataEmissao} required />
         <Campo label="Validade (dias)" value={validadeDias} onChange={setValidadeDias} placeholder="15" />
         <Campo label="Responsável técnico" value={responsavelTecnico} onChange={setResponsavelTecnico} placeholder="Ex: Eng. Matheus Keitaro" />
+        <SelectCampo
+          label="CNPJ emissor"
+          value={cnpjEmissorId}
+          onChange={setCnpjEmissorId}
+          options={cnpjsDisponiveis.map((c) => ({ valor: c.id, label: c.cnpj ? `${c.label} — ${c.cnpj}` : c.label }))}
+          placeholder="Selecione..."
+        />
         <Campo label="Condições de pagamento" value={condicoesPagamento} onChange={setCondicoesPagamento} placeholder="Ex: 50% na aprovação, 50% na entrega" />
         <Campo label="Prazo de entrega/execução" value={prazoEntrega} onChange={setPrazoEntrega} placeholder="Ex: 15 dias úteis" />
         <div className="sm:col-span-2">

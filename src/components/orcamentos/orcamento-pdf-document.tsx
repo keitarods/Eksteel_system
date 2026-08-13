@@ -2,7 +2,7 @@ import { Document, Page, View, Text, Image, StyleSheet } from "@react-pdf/render
 import type { StyleProp } from "@react-pdf/stylesheet";
 import type { ClienteOrcamento, Orcamento, OrcamentoItem } from "@/lib/orcamentos/types";
 import { calcularDataValidade, formatarData, formatarMoeda } from "@/lib/orcamentos/calculos";
-import { EMPRESA_ORCAMENTO } from "@/lib/orcamentos/empresa";
+import type { EmpresaConfig } from "@/lib/orcamentos/empresa";
 
 const AZUL_MARCA = "#37474F";
 const AZUL_MARCA_CLARO = "#546E7A";
@@ -13,18 +13,19 @@ const CINZA_FUNDO_TABELA = "#ECEFF1";
 
 const styles = StyleSheet.create({
   page: {
-    paddingTop: 110,
+    paddingTop: 32,
     paddingBottom: 60,
     paddingHorizontal: 36,
     fontSize: 9,
     fontFamily: "Helvetica",
     color: CINZA_TEXTO,
   },
+  // Cabeçalho e bloco de título ficam em fluxo normal (não position:absolute com
+  // coordenadas fixas) — assim o tamanho real do conteúdo (nº de linhas do
+  // endereço da empresa etc.) empurra o que vem depois, em vez de precisar
+  // acertar na mão quanto espaço reservar. Os dois continuam `fixed` (repetem
+  // em toda página), só não são mais sobrepostos manualmente por coordenada.
   header: {
-    position: "absolute",
-    top: 24,
-    left: 36,
-    right: 36,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
@@ -37,13 +38,11 @@ const styles = StyleSheet.create({
   empresaNome: { fontSize: 10, fontWeight: 700, color: AZUL_MARCA, marginBottom: 2 },
   empresaLinha: { fontSize: 7.5, color: CINZA_SECUNDARIO, textAlign: "right" },
   tituloBloco: {
-    position: "absolute",
-    top: 66,
-    left: 36,
-    right: 36,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    marginTop: 10,
+    marginBottom: 4,
   },
   tituloOrcamento: { fontSize: 14, fontWeight: 700, color: AZUL_MARCA, letterSpacing: 1 },
   tituloMeta: { fontSize: 8, color: CINZA_SECUNDARIO, textAlign: "right" },
@@ -140,11 +139,13 @@ export default function OrcamentoPdfDocument({
   orcamento,
   itens,
   cliente,
+  empresa,
   logoSrc,
 }: {
   orcamento: Orcamento;
   itens: OrcamentoItem[];
   cliente: ClienteOrcamento | null;
+  empresa: EmpresaConfig;
   logoSrc?: string;
 }) {
   const dataValidade = calcularDataValidade(orcamento.dataEmissao, orcamento.validadeDias);
@@ -159,11 +160,17 @@ export default function OrcamentoPdfDocument({
             <Text style={styles.empresaNome}>EKSTEEL</Text>
           )}
           <View style={styles.empresaInfo}>
-            <Text style={styles.empresaNome}>{EMPRESA_ORCAMENTO.razaoSocial}</Text>
-            <Text style={styles.empresaLinha}>CNPJ: {EMPRESA_ORCAMENTO.cnpj}</Text>
-            <Text style={styles.empresaLinha}>{EMPRESA_ORCAMENTO.endereco}</Text>
-            <Text style={styles.empresaLinha}>{EMPRESA_ORCAMENTO.telefone} · {EMPRESA_ORCAMENTO.email}</Text>
-            <Text style={styles.empresaLinha}>{EMPRESA_ORCAMENTO.site}</Text>
+            <Text style={styles.empresaNome}>{empresa.razaoSocial}</Text>
+            {orcamento.cnpjEmissor && (
+              <Text style={styles.empresaLinha}>
+                {orcamento.cnpjEmissorLabel} — CNPJ: {orcamento.cnpjEmissor}
+              </Text>
+            )}
+            {empresa.endereco && <Text style={styles.empresaLinha}>{empresa.endereco}</Text>}
+            {(empresa.telefone || empresa.email) && (
+              <Text style={styles.empresaLinha}>{[empresa.telefone, empresa.email].filter(Boolean).join(" · ")}</Text>
+            )}
+            {empresa.site && <Text style={styles.empresaLinha}>{empresa.site}</Text>}
           </View>
         </View>
 
@@ -277,7 +284,7 @@ export default function OrcamentoPdfDocument({
 
         <View style={styles.assinaturaBox} wrap={false}>
           <View style={styles.assinaturaLinha} />
-          <Text style={styles.assinaturaNome}>{orcamento.responsavelTecnico || EMPRESA_ORCAMENTO.razaoSocial}</Text>
+          <Text style={styles.assinaturaNome}>{orcamento.responsavelTecnico || empresa.razaoSocial}</Text>
           <Text style={styles.agradecimento}>
             Agradecemos a oportunidade e ficamos à disposição para quaisquer esclarecimentos.
           </Text>
@@ -285,7 +292,7 @@ export default function OrcamentoPdfDocument({
 
         <View style={styles.footer} fixed>
           <Text style={styles.footerTexto}>
-            {EMPRESA_ORCAMENTO.telefone} · {EMPRESA_ORCAMENTO.email}
+            {empresa.telefone} · {empresa.email}
           </Text>
           <Text
             style={styles.footerTexto}

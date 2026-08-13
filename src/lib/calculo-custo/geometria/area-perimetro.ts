@@ -34,8 +34,10 @@ function pontoDentroDoPoligono(ponto: Ponto, pontos: Ponto[]): boolean {
 // Área líquida (contorno externo menos furos) e perímetro total (externo + furos,
 // já que o laser corta os dois). Assume um nível de aninhamento (furos dentro do
 // contorno externo maior) — cobre o caso comum de peças de chapa; não trata
-// "ilha dentro de furo dentro de peça" (raro nesse contexto).
-export function calcularAreaEPerimetro(contornos: Contorno[]): ResultadoGeometria {
+// "ilha dentro de furo dentro de peça" (raro nesse contexto). Não inclui
+// dobrasDetectadas — isso é adicionado por calcularGeometriaDxf, que é quem tem
+// acesso às entidades brutas (camadas) usadas pra sugerir o número de dobras.
+export function calcularAreaEPerimetro(contornos: Contorno[]): Omit<ResultadoGeometria, "dobrasDetectadas"> {
   const fechados = contornos.filter((c) => c.fechado && c.pontos.length >= 4);
 
   const comArea = fechados

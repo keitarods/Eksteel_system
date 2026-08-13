@@ -11,6 +11,7 @@ import {
   type OrcamentoItem,
   type StatusOrcamento,
 } from "@/lib/orcamentos/types";
+import type { EmpresaCnpj } from "@/lib/orcamentos/empresa";
 import { formatarData, formatarMoeda } from "@/lib/orcamentos/calculos";
 import { Botao, Cartao, FeedbackBloco, Th, Td } from "./ui";
 import StatusBadge from "./status-badge";
@@ -29,6 +30,7 @@ export default function OrcamentoDetalhe({
   usuarioId,
   dataHoje,
   clientesIniciais,
+  cnpjsDisponiveis,
   orcamentoInicial,
   itensIniciais,
   cliente,
@@ -36,6 +38,7 @@ export default function OrcamentoDetalhe({
   usuarioId: string;
   dataHoje: string;
   clientesIniciais: ClienteOrcamento[];
+  cnpjsDisponiveis: EmpresaCnpj[];
   orcamentoInicial: Orcamento;
   itensIniciais: OrcamentoItem[];
   cliente: ClienteOrcamento | null;
@@ -93,6 +96,7 @@ export default function OrcamentoDetalhe({
             usuarioId={usuarioId}
             dataHoje={dataHoje}
             clientesIniciais={clientesIniciais}
+            cnpjsDisponiveis={cnpjsDisponiveis}
             orcamentoExistente={orcamento}
             itensExistentes={itens}
             onCancelar={() => setEditando(false)}
@@ -166,6 +170,10 @@ export default function OrcamentoDetalhe({
           <LinhaDetalhe label="Pagamento" valor={orcamento.condicoesPagamento || "-"} />
           <LinhaDetalhe label="Prazo de entrega" valor={orcamento.prazoEntrega || "-"} />
           <LinhaDetalhe label="Responsável técnico" valor={orcamento.responsavelTecnico || "-"} />
+          <LinhaDetalhe
+            label="CNPJ emissor"
+            valor={orcamento.cnpjEmissorLabel ? `${orcamento.cnpjEmissorLabel}${orcamento.cnpjEmissor ? ` — ${orcamento.cnpjEmissor}` : ""}` : "-"}
+          />
         </Cartao>
       </div>
 

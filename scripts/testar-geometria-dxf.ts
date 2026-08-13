@@ -5,7 +5,14 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { calcularGeometriaDxf } from "../src/lib/calculo-custo/geometria";
 
-const casos = [
+type Esperado = {
+  areaMm2: number;
+  perimetroMm: number;
+  furos: number;
+  dobrasDetectadas?: number;
+};
+
+const casos: { arquivo: string; descricao: string; esperado: Esperado }[] = [
   {
     arquivo: "retangulo-simples.dxf",
     descricao: "Retângulo 100×50mm (4 LINEs)",
@@ -31,6 +38,11 @@ const casos = [
     descricao: "Círculo raio 10mm via POLYLINE antigo com bulge NEGATIVO (sentido horário)",
     esperado: { areaMm2: Math.PI * 10 ** 2, perimetroMm: 2 * Math.PI * 10, furos: 0 },
   },
+  {
+    arquivo: "retangulo-com-linhas-dobra.dxf",
+    descricao: "Retângulo 100×50mm + 2 linhas na camada BEND (sugestão de número de dobras)",
+    esperado: { areaMm2: 5000, perimetroMm: 300, furos: 0, dobrasDetectadas: 2 },
+  },
 ];
 
 let algumFalhou = false;
@@ -43,10 +55,12 @@ for (const caso of casos) {
   const erroPerimetro = Math.abs(resultado.perimetroMm - caso.esperado.perimetroMm);
   const toleranciaArea = caso.esperado.areaMm2 * 0.01; // 1% (amostragem de arco não é exata)
   const toleranciaPerimetro = caso.esperado.perimetroMm * 0.01;
+  const dobrasOk = caso.esperado.dobrasDetectadas === undefined || resultado.dobrasDetectadas === caso.esperado.dobrasDetectadas;
   const passou =
     erroArea <= toleranciaArea &&
     erroPerimetro <= toleranciaPerimetro &&
-    resultado.furos === caso.esperado.furos;
+    resultado.furos === caso.esperado.furos &&
+    dobrasOk;
 
   console.log(`\n${passou ? "✅" : "❌"} ${caso.descricao}`);
   console.log(
@@ -56,6 +70,9 @@ for (const caso of casos) {
     `   perímetro: calculado=${resultado.perimetroMm.toFixed(3)}mm   esperado=${caso.esperado.perimetroMm.toFixed(3)}mm   erro=${erroPerimetro.toFixed(4)}`
   );
   console.log(`   furos:     calculado=${resultado.furos}   esperado=${caso.esperado.furos}`);
+  if (caso.esperado.dobrasDetectadas !== undefined) {
+    console.log(`   dobras:    calculado=${resultado.dobrasDetectadas}   esperado=${caso.esperado.dobrasDetectadas}`);
+  }
   console.log(`   bbox:      ${resultado.bbox.larguraMm.toFixed(2)}mm × ${resultado.bbox.alturaMm.toFixed(2)}mm`);
 
   if (!passou) algumFalhou = true;

@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { buscarOrcamentoCompleto } from "@/lib/orcamentos/queries";
 import { mapClienteOrcamento } from "@/lib/orcamentos/types";
+import { listarEmpresaCnpjs } from "@/lib/orcamentos/empresa";
 import OrcamentoDetalhe from "@/components/orcamentos/orcamento-detalhe";
 
 function hojeIso() {
@@ -29,9 +30,10 @@ export default async function OrcamentoDetalhePage({ params }: { params: Promise
   const resultado = await buscarOrcamentoCompleto(supabase, id);
   if (!resultado) notFound();
 
-  const [{ data: clientesRaw }, { data: clienteRaw }] = await Promise.all([
+  const [{ data: clientesRaw }, { data: clienteRaw }, cnpjs] = await Promise.all([
     supabase.from("clientes_orcamento").select("*").order("nome"),
     supabase.from("clientes_orcamento").select("*").eq("id", resultado.orcamento.clienteId).maybeSingle(),
+    listarEmpresaCnpjs(supabase),
   ]);
 
   return (
@@ -47,6 +49,7 @@ export default async function OrcamentoDetalhePage({ params }: { params: Promise
             usuarioId={user.id}
             dataHoje={hojeIso()}
             clientesIniciais={(clientesRaw ?? []).map(mapClienteOrcamento)}
+            cnpjsDisponiveis={cnpjs}
             orcamentoInicial={resultado.orcamento}
             itensIniciais={resultado.itens}
             cliente={clienteRaw ? mapClienteOrcamento(clienteRaw) : null}

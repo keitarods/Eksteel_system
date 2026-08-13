@@ -5,7 +5,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { buscarOrcamentoCompleto } from "@/lib/orcamentos/queries";
 import { mapClienteOrcamento } from "@/lib/orcamentos/types";
 import { calcularDataValidade, formatarData, formatarMoeda } from "@/lib/orcamentos/calculos";
-import { EMPRESA_ORCAMENTO } from "@/lib/orcamentos/empresa";
+import { buscarEmpresaConfig } from "@/lib/orcamentos/empresa";
 import { Th, Td } from "@/components/orcamentos/ui";
 import StatusBadge from "@/components/orcamentos/status-badge";
 
@@ -20,11 +20,10 @@ export default async function OrcamentoPublicoPage({ params }: { params: Promise
 
   const { orcamento, itens } = resultado;
 
-  const { data: clienteRaw } = await supabase
-    .from("clientes_orcamento")
-    .select("*")
-    .eq("id", orcamento.clienteId)
-    .maybeSingle();
+  const [{ data: clienteRaw }, empresa] = await Promise.all([
+    supabase.from("clientes_orcamento").select("*").eq("id", orcamento.clienteId).maybeSingle(),
+    buscarEmpresaConfig(supabase),
+  ]);
   const cliente = clienteRaw ? mapClienteOrcamento(clienteRaw) : null;
   const dataValidade = calcularDataValidade(orcamento.dataEmissao, orcamento.validadeDias);
 
@@ -34,8 +33,9 @@ export default async function OrcamentoPublicoPage({ params }: { params: Promise
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#333333] pb-6">
           <Image src="/images/Eksteel-logo.png" alt="Eksteel" width={150} height={46} unoptimized className="h-11 w-auto object-contain" />
           <div className="text-right text-xs text-[#78909C]">
-            <p className="font-semibold text-[#90A4AE]">{EMPRESA_ORCAMENTO.razaoSocial}</p>
-            <p>{EMPRESA_ORCAMENTO.telefone} · {EMPRESA_ORCAMENTO.email}</p>
+            <p className="font-semibold text-[#90A4AE]">{empresa.razaoSocial}</p>
+            {orcamento.cnpjEmissor && <p>{orcamento.cnpjEmissorLabel} — CNPJ: {orcamento.cnpjEmissor}</p>}
+            <p>{empresa.telefone} · {empresa.email}</p>
           </div>
         </div>
 
@@ -121,7 +121,7 @@ export default async function OrcamentoPublicoPage({ params }: { params: Promise
         </div>
 
         <p className="mt-8 text-center text-xs text-[#455A64]">
-          {EMPRESA_ORCAMENTO.razaoSocial} · {EMPRESA_ORCAMENTO.site}
+          {empresa.razaoSocial} · {empresa.site}
         </p>
       </section>
     </main>

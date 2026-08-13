@@ -27,6 +27,10 @@ const GRUPOS: { titulo: string; chaves: string[] }[] = [
     ],
   },
   {
+    titulo: "Dobra",
+    chaves: ["valor_por_dobra"],
+  },
+  {
     titulo: "Fatores gerais (%)",
     chaves: ["scrap_factor", "margem_lucro_padrao", "frete_logistica_padrao"],
   },
