@@ -76,7 +76,7 @@ export default function PerfisCalculadora({
         }
       : null;
 
-  const { preco, densidade } = chavesParametroMaterial(materialAtivo);
+  const { preco, densidade } = chavesParametroMaterial("perfis", materialAtivo);
   const precoKg = parametros[preco]?.valor ?? 0;
   const densidadeKgM3 = parametros[densidade]?.valor ?? 0;
 

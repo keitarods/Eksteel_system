@@ -1,14 +1,17 @@
-import type { VelocidadeCorte } from "./parametros";
+import type { ProcessoCorte, VelocidadeCorte } from "./parametros";
 
-// Interpola (linear sobre a espessura, ponto mais próximo sobre a potência) a
-// velocidade de corte a partir da tabela de referência salva em velocidades_corte.
+// Apesar do nome do arquivo, serve os três processos de corte (laser, oxicorte,
+// plasma) — a matemática de interpolação é idêntica, só muda a tabela filtrada
+// por `processo`. "potência" é reaproveitada como amperagem nominal no plasma
+// (oxicorte usa um valor fixo, já que não varia por "potência" do mesmo jeito).
 export function estimarVelocidadeCorte(
   tabela: VelocidadeCorte[],
+  processo: ProcessoCorte,
   material: string,
   espessuraMm: number,
   potenciaKw: number
 ): number {
-  const doMaterial = tabela.filter((v) => v.material === material);
+  const doMaterial = tabela.filter((v) => v.processo === processo && v.material === material);
   if (doMaterial.length === 0) return 0;
 
   const potencias = Array.from(new Set(doMaterial.map((v) => v.potenciaKw))).sort((a, b) => a - b);

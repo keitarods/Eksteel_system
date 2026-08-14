@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import { buscarParametrosVigentes } from "@/lib/calculo-custo/parametros";
 import { mapPerfilMetalico } from "@/lib/calculo-custo/perfis";
 import PerfisCalculadora from "@/components/calculadora/perfis-calculadora";
+import PerfisParametrosForm from "@/components/calculadora/perfis-parametros-form";
+import AbasModulo from "@/components/calculadora/abas-modulo";
 
 export default async function TubosPerfisPage() {
   const supabase = await createClient();
@@ -42,7 +44,10 @@ export default async function TubosPerfisPage() {
         </p>
 
         <div className="mt-6">
-          <PerfisCalculadora usuarioId={user.id} parametros={parametros} perfisIniciais={perfis} />
+          <AbasModulo
+            abaCalculadora={<PerfisCalculadora usuarioId={user.id} parametros={parametros} perfisIniciais={perfis} />}
+            abaParametros={<PerfisParametrosForm usuarioId={user.id} parametrosIniciais={parametros} />}
+          />
         </div>
       </section>
     </main>

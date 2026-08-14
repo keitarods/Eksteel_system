@@ -3,11 +3,11 @@ import { redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { buscarParametrosVigentes, buscarVelocidadesCorte } from "@/lib/calculo-custo/parametros";
-import ChapaCalculadora from "@/components/calculadora/chapa-calculadora";
-import ChapaParametrosForm from "@/components/calculadora/chapa-parametros-form";
+import OxicorteCalculadora from "@/components/calculadora/oxicorte-calculadora";
+import OxicorteParametrosForm from "@/components/calculadora/oxicorte-parametros-form";
 import AbasModulo from "@/components/calculadora/abas-modulo";
 
-export default async function ChapaCalculadoraPage() {
+export default async function OxicortePage() {
   const supabase = await createClient();
 
   const {
@@ -22,11 +22,11 @@ export default async function ChapaCalculadoraPage() {
     .maybeSingle();
   if (!vinculo || vinculo.papel === "pendente") redirect("/pendente");
 
-  const [parametros, velocidades] = await Promise.all([
+  const [parametros, velocidadesTodas] = await Promise.all([
     buscarParametrosVigentes(supabase),
     buscarVelocidadesCorte(supabase),
   ]);
-  const velocidadesLaser = velocidades.filter((v) => v.processo === "laser");
+  const velocidades = velocidadesTodas.filter((v) => v.processo === "oxicorte" || v.processo === "plasma");
 
   return (
     <main className="min-h-screen bg-[#1e1e1e] px-3 py-5 text-[#ECEFF1] sm:px-6 sm:py-8">
@@ -36,17 +36,17 @@ export default async function ChapaCalculadoraPage() {
           Voltar à calculadora
         </Link>
         <p className="text-sm font-semibold text-[#90A4AE]">Calculadora</p>
-        <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Chapa cortada a laser (DXF)</h1>
+        <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Oxicorte e plasma</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-[#78909C]">
-          O DXF é lido no seu navegador — o arquivo original não é enviado nem guardado, só os números
-          calculados (área, perímetro, peso, custo).
+          Chapa grossa cortada por oxicorte (só aço carbono) ou plasma. Use um DXF pra pegar o perímetro
+          automaticamente, ou informe área/perímetro na mão — comum não ter desenho CAD nesse tipo de corte.
         </p>
 
         <div className="mt-6">
           <AbasModulo
-            abaCalculadora={<ChapaCalculadora usuarioId={user.id} parametros={parametros} velocidades={velocidades} />}
+            abaCalculadora={<OxicorteCalculadora usuarioId={user.id} parametros={parametros} velocidades={velocidades} />}
             abaParametros={
-              <ChapaParametrosForm usuarioId={user.id} parametrosIniciais={parametros} velocidadesIniciais={velocidadesLaser} />
+              <OxicorteParametrosForm usuarioId={user.id} parametrosIniciais={parametros} velocidadesIniciais={velocidades} />
             }
           />
         </div>

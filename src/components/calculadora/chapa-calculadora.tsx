@@ -6,7 +6,8 @@ import { createClient } from "@/lib/supabase/client";
 import { calcularGeometriaDxf, contornosParaSvg } from "@/lib/calculo-custo/geometria";
 import { calcularCustoMaterial, calcularPesoPeca } from "@/lib/calculo-custo/material";
 import { calcularCustoCorte, calcularTempoCorteMin, estimarVelocidadeCorte } from "@/lib/calculo-custo/laser";
-import { calcularCustoDobra } from "@/lib/calculo-custo/dobra";
+import { calcularCustoDobra, calcularTempoDobraSeg } from "@/lib/calculo-custo/dobra";
+import { calcularCustoSetupChapa } from "@/lib/calculo-custo/setup";
 import {
   MATERIAIS,
   POTENCIAS_LASER_KW,
@@ -41,7 +42,9 @@ type PecaLote = {
   custoMaterial: number;
   tempoCorteMin: number;
   custoCorte: number;
+  tempoDobraTotalSeg: number;
   custoDobra: number;
+  custoSetupRateado: number;
   custoUnitario: number;
   custoTotal: number;
 };
@@ -102,28 +105,42 @@ export default function ChapaCalculadora({
 
   function calcularPeca(): Omit<PecaLote, "id" | "nomeArquivo" | "resultado" | "svg"> | null {
     if (!arquivoAtual) return null;
-    const { preco, densidade } = chavesParametroMaterial(material);
+    const { preco, densidade } = chavesParametroMaterial("chapa", material);
     const precoKg = parametros[preco]?.valor ?? 0;
     const densidadeKgM3 = parametros[densidade]?.valor ?? 0;
     const horaLaser = parametros["hora_maquina_laser"]?.valor ?? 0;
     const gasHora = parametros["custo_gas_corte_hora"]?.valor ?? 0;
-    const valorPorDobra = parametros["valor_por_dobra"]?.valor ?? 0;
+    const horaDobra = parametros["hora_maquina_dobra"]?.valor ?? 0;
+    const tempoPadraoDobraSeg = parametros["tempo_padrao_dobra_seg"]?.valor ?? 0;
+    const tempoSetupLaserMin = parametros["tempo_setup_laser_min"]?.valor ?? 0;
+    const tempoSetupDobraMin = parametros["tempo_setup_dobra_min"]?.valor ?? 0;
 
     const areaM2 = arquivoAtual.resultado.areaMm2 / 1e6;
     const perimetroM = arquivoAtual.resultado.perimetroMm / 1000;
     const espessura = parseNumero(espessuraMm);
     const qtd = parseNumero(quantidade) || 1;
+    const incluiDobra = processo === "corte_dobra";
 
     const pesoKg = calcularPesoPeca(areaM2, espessura, densidadeKgM3);
     const custoMaterial = calcularCustoMaterial(pesoKg, precoKg);
 
-    const velocidade = estimarVelocidadeCorte(velocidades, materialParaVelocidadeCorte(material), espessura, potenciaKw);
+    const velocidade = estimarVelocidadeCorte(velocidades, "laser", materialParaVelocidadeCorte(material), espessura, potenciaKw);
     const tempoCorteMin = calcularTempoCorteMin(perimetroM, velocidade);
     const custoCorte = calcularCustoCorte(tempoCorteMin, horaLaser, gasHora);
 
-    const custoDobra = processo === "corte_dobra" ? calcularCustoDobra(parseNumero(numeroDobras), valorPorDobra) : 0;
+    const tempoDobraTotalSeg = incluiDobra ? calcularTempoDobraSeg(parseNumero(numeroDobras), tempoPadraoDobraSeg) : 0;
+    const custoDobra = incluiDobra ? calcularCustoDobra(tempoDobraTotalSeg, horaDobra) : 0;
 
-    const custoUnitario = custoMaterial + custoCorte + custoDobra;
+    const { custoSetupPorPeca } = calcularCustoSetupChapa({
+      tempoSetupLaserMin,
+      horaMaquinaLaser: horaLaser,
+      incluiDobra,
+      tempoSetupDobraMin,
+      horaMaquinaDobra: horaDobra,
+      quantidade: qtd,
+    });
+
+    const custoUnitario = custoMaterial + custoCorte + custoDobra + custoSetupPorPeca;
     return {
       material,
       espessuraMm,
@@ -135,7 +152,9 @@ export default function ChapaCalculadora({
       custoMaterial,
       tempoCorteMin,
       custoCorte,
+      tempoDobraTotalSeg,
       custoDobra,
+      custoSetupRateado: custoSetupPorPeca,
       custoUnitario,
       custoTotal: custoUnitario * qtd,
     };
@@ -176,7 +195,9 @@ export default function ChapaCalculadora({
       custo_material: peca.custoMaterial,
       custo_corte: peca.custoCorte,
       numero_dobras: peca.processo === "corte_dobra" ? parseNumero(peca.numeroDobras) : 0,
+      tempo_dobra_total_seg: peca.tempoDobraTotalSeg,
       custo_dobra: peca.custoDobra,
+      custo_setup_rateado: peca.custoSetupRateado,
       custo_total: peca.custoUnitario,
       quantidade: parseNumero(peca.quantidade) || 1,
       svg_preview: peca.svg,
@@ -256,6 +277,7 @@ export default function ChapaCalculadora({
                     {" · "}Dobra: <span className="font-semibold text-[#90A4AE]">{previaPeca.custoDobra.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
                   </>
                 )}
+                {" · "}Setup (rateado{quantidade && parseNumero(quantidade) > 1 ? ` /${quantidade}` : ""}): <span className="font-semibold text-[#90A4AE]">{previaPeca.custoSetupRateado.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
               </p>
               <p className="mt-1 text-sm">
                 Custo por peça: <span className="font-semibold text-[#90A4AE]">
@@ -321,7 +343,7 @@ export default function ChapaCalculadora({
                           usuarioId={usuarioId}
                           tipoItem="produto"
                           descricao={`Chapa ${p.processo === "corte_dobra" ? "cortada e dobrada" : "cortada a laser"} — ${p.nomeArquivo}`}
-                          detalhamentoTecnico={`Material: ${MATERIAIS.find((m) => m.valor === p.material)?.label}, espessura ${p.espessuraMm}mm. Peso ${p.pesoKg.toFixed(3)}kg/un. Área ${(p.resultado.areaMm2 / 1e6).toFixed(4)}m², perímetro ${(p.resultado.perimetroMm / 1000).toFixed(3)}m. Tempo de corte estimado ${p.tempoCorteMin.toFixed(1)}min (laser ${p.potenciaKw}kW).${p.processo === "corte_dobra" ? ` ${p.numeroDobras} dobra(s).` : ""}`}
+                          detalhamentoTecnico={`Material: ${MATERIAIS.find((m) => m.valor === p.material)?.label}, espessura ${p.espessuraMm}mm. Peso ${p.pesoKg.toFixed(3)}kg/un. Área ${(p.resultado.areaMm2 / 1e6).toFixed(4)}m², perímetro ${(p.resultado.perimetroMm / 1000).toFixed(3)}m. Tempo de corte estimado ${p.tempoCorteMin.toFixed(1)}min (laser ${p.potenciaKw}kW).${p.processo === "corte_dobra" ? ` ${p.numeroDobras} dobra(s), ${p.tempoDobraTotalSeg.toFixed(0)}s.` : ""} Setup rateado: R$${p.custoSetupRateado.toFixed(2)}/un.`}
                           quantidade={parseNumero(p.quantidade) || 1}
                           valorUnitario={p.custoUnitario}
                         />

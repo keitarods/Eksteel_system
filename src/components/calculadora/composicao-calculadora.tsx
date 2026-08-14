@@ -4,21 +4,37 @@ import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { calcularComposicao, type ItemComposicao } from "@/lib/calculo-custo/composicao";
 import type { Parametro } from "@/lib/calculo-custo/parametros";
-import type { CalculoPeca } from "@/lib/calculo-custo/types";
+import { TIPOS_CALCULO, type CalculoPeca } from "@/lib/calculo-custo/types";
 import { Botao, Campo, Cartao, FeedbackBloco, Th, Td } from "@/components/orcamentos/ui";
 import AdicionarAoOrcamentoBotao from "./adicionar-ao-orcamento-botao";
 
 type LinhaLivre = { id: string; descricao: string; valor: string };
 
+// Chaves reais de parametros_custo (antes desse ajuste, "Solda MIG/TIG" e
+// "Usinagem" apontavam pra chaves que nunca chegaram a ser seedadas —
+// hora_soldador_mig/tig e as hora-máquina de usinagem são específicas por
+// equipamento agora, sem uma chave única representativa; a opção de usinagem
+// foi removida daqui porque o módulo dedicado (com seleção de equipamento)
+// já cobre esse caso via "Peças já calculadas" acima.
 const PROCESSOS = [
-  { chave: "hora_maquina_solda_mig", label: "Solda MIG" },
-  { chave: "hora_maquina_solda_tig", label: "Solda TIG" },
+  { chave: "hora_soldador_mig", label: "Solda MIG" },
+  { chave: "hora_soldador_tig", label: "Solda TIG" },
   { chave: "hora_maquina_dobra", label: "Dobra" },
-  { chave: "hora_maquina_usinagem", label: "Usinagem" },
 ];
 
 function novaLinha(): LinhaLivre {
   return { id: crypto.randomUUID(), descricao: "", valor: "0" };
+}
+
+// Cada tipo_calculo guarda características diferentes (chapa tem espessura,
+// torneamento/fresamento/soldagem não necessariamente) — resume o que faz
+// sentido mostrar por tipo em vez de assumir sempre "material, espessura".
+function resumoPeca(p: CalculoPeca): string {
+  const tipoLabel = TIPOS_CALCULO.find((t) => t.valor === p.tipoCalculo)?.label ?? p.tipoCalculo;
+  if (p.tipoCalculo.startsWith("chapa_")) {
+    return `${tipoLabel}, ${p.material}, ${p.espessuraMm}mm, ${p.quantidade}x`;
+  }
+  return `${tipoLabel}, ${p.material}, ${p.quantidade}x`;
 }
 
 export default function ComposicaoCalculadora({
@@ -32,10 +48,9 @@ export default function ComposicaoCalculadora({
 }) {
   const [pecasSelecionadas, setPecasSelecionadas] = useState<Set<string>>(new Set());
   const [horasProcesso, setHorasProcesso] = useState<Record<string, string>>({
-    hora_maquina_solda_mig: "0",
-    hora_maquina_solda_tig: "0",
+    hora_soldador_mig: "0",
+    hora_soldador_tig: "0",
     hora_maquina_dobra: "0",
-    hora_maquina_usinagem: "0",
   });
   const [maoDeObraExtra, setMaoDeObraExtra] = useState<LinhaLivre[]>([]);
   const [insumos, setInsumos] = useState<LinhaLivre[]>([]);
@@ -44,6 +59,13 @@ export default function ComposicaoCalculadora({
   const [scrapCustom, setScrapCustom] = useState(String(parametros["scrap_factor"]?.valor ?? 12));
   const [usarMargemCustom, setUsarMargemCustom] = useState(false);
   const [margemCustom, setMargemCustom] = useState(String(parametros["margem_lucro_padrao"]?.valor ?? 30));
+
+  const [usarDeslocamento, setUsarDeslocamento] = useState(false);
+  const [kmDeslocamento, setKmDeslocamento] = useState("0");
+  const [diariaDeslocamento, setDiariaDeslocamento] = useState("0");
+
+  const [usarComplexidade, setUsarComplexidade] = useState(false);
+  const [complexidadePercentual, setComplexidadePercentual] = useState("15");
 
   const [descricaoItem, setDescricaoItem] = useState("Peça fabricada");
 
@@ -61,7 +83,10 @@ export default function ComposicaoCalculadora({
     });
   }
 
-  const itens: ItemComposicao[] = [
+  const custoKm = parametros["custo_km_deslocamento"]?.valor ?? 0;
+  const valorDeslocamento = usarDeslocamento ? parseNumero(kmDeslocamento) * custoKm + parseNumero(diariaDeslocamento) : 0;
+
+  const itensBase: ItemComposicao[] = [
     ...pecasIniciais
       .filter((p) => pecasSelecionadas.has(p.id))
       .map((p) => ({ descricao: `${p.nome} (${p.quantidade}x)`, valor: p.custoTotal * p.quantidade })),
@@ -71,6 +96,16 @@ export default function ComposicaoCalculadora({
     })),
     ...maoDeObraExtra.filter((l) => l.descricao.trim()).map((l) => ({ descricao: l.descricao, valor: parseNumero(l.valor) })),
     ...insumos.filter((l) => l.descricao.trim()).map((l) => ({ descricao: l.descricao, valor: parseNumero(l.valor) })),
+    ...(valorDeslocamento > 0 ? [{ descricao: "Deslocamento/instalação", valor: valorDeslocamento }] : []),
+  ];
+
+  const subtotalDireto = itensBase.reduce((s, i) => s + i.valor, 0);
+  const complexidadePct = parseNumero(complexidadePercentual);
+  const valorComplexidade = usarComplexidade ? subtotalDireto * (complexidadePct / 100) : 0;
+
+  const itens: ItemComposicao[] = [
+    ...itensBase,
+    ...(valorComplexidade > 0 ? [{ descricao: `Fator de complexidade (+${complexidadePct}%, peça sob medida)`, valor: valorComplexidade }] : []),
   ];
 
   const scrapPercentual = usarScrapCustom ? parseNumero(scrapCustom) : (parametros["scrap_factor"]?.valor ?? 0);
@@ -95,7 +130,7 @@ export default function ComposicaoCalculadora({
                     onChange={() => alternarPeca(p.id)}
                     className="h-4 w-4 accent-[#546E7A]"
                   />
-                  {p.nome} <span className="text-xs text-[#78909C]">({p.material}, {p.espessuraMm}mm, {p.quantidade}x)</span>
+                  {p.nome} <span className="text-xs text-[#78909C]">({resumoPeca(p)})</span>
                 </span>
                 <span className="font-semibold text-[#90A4AE]">
                   {(p.custoTotal * p.quantidade).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
@@ -150,6 +185,35 @@ export default function ComposicaoCalculadora({
             <button type="button" onClick={() => setInsumos((prev) => prev.filter((l) => l.id !== linha.id))} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-red-900/50 text-red-400 hover:bg-red-900/20"><Trash2 className="h-3.5 w-3.5" /></button>
           </div>
         ))}
+      </Cartao>
+
+      <Cartao>
+        <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Deslocamento e complexidade</p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="rounded-2xl border border-[#2a2a2a] bg-[#141414] p-3">
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={usarDeslocamento} onChange={(e) => setUsarDeslocamento(e.target.checked)} className="h-4 w-4 accent-[#546E7A]" />
+              Cobrar deslocamento/instalação (R$ {custoKm.toFixed(2)}/km)
+            </label>
+            {usarDeslocamento && (
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <Campo label="Km rodado (ida e volta)" value={kmDeslocamento} onChange={setKmDeslocamento} />
+                <Campo label="Diária fixa (R$, opcional)" value={diariaDeslocamento} onChange={setDiariaDeslocamento} />
+              </div>
+            )}
+          </div>
+          <div className="rounded-2xl border border-[#2a2a2a] bg-[#141414] p-3">
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={usarComplexidade} onChange={(e) => setUsarComplexidade(e.target.checked)} className="h-4 w-4 accent-[#546E7A]" />
+              Aplicar fator de complexidade (peça sob medida, sem histórico)
+            </label>
+            {usarComplexidade && (
+              <div className="mt-2">
+                <Campo label="Complexidade (% sobre o custo direto)" value={complexidadePercentual} onChange={setComplexidadePercentual} />
+              </div>
+            )}
+          </div>
+        </div>
       </Cartao>
 
       <Cartao>

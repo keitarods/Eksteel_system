@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import { buscarParametrosVigentes } from "@/lib/calculo-custo/parametros";
 import { mapCalculoPeca } from "@/lib/calculo-custo/types";
 import ComposicaoCalculadora from "@/components/calculadora/composicao-calculadora";
+import ComposicaoParametrosForm from "@/components/calculadora/composicao-parametros-form";
+import AbasModulo from "@/components/calculadora/abas-modulo";
 
 export default async function ComposicaoPage() {
   const supabase = await createClient();
@@ -42,7 +44,10 @@ export default async function ComposicaoPage() {
         </p>
 
         <div className="mt-6">
-          <ComposicaoCalculadora usuarioId={user.id} parametros={parametros} pecasIniciais={pecas} />
+          <AbasModulo
+            abaCalculadora={<ComposicaoCalculadora usuarioId={user.id} parametros={parametros} pecasIniciais={pecas} />}
+            abaParametros={<ComposicaoParametrosForm usuarioId={user.id} parametrosIniciais={parametros} />}
+          />
         </div>
       </section>
     </main>
