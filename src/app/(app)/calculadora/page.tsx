@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowLeft, ArrowRight, Cog, Flame, Layers, Ruler, SquareStack, Zap } from "lucide-react";
+import { ArrowLeft, ArrowRight, Cog, Flame, Layers, PenTool, Ruler, SquareStack, Zap } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 
 const CARDS = [
@@ -40,6 +40,12 @@ const CARDS = [
     titulo: "Composição final",
     descricao: "Consolide chapas, perfis, mão de obra e insumos num preço final com margem.",
   },
+  {
+    href: "/calculadora/cad-cae",
+    icone: PenTool,
+    titulo: "CAD/CAE",
+    descricao: "Desenho técnico e cálculo/simulação por hora, com preço variando por nível de responsabilidade.",
+  },
 ];
 
 export default async function CalculadoraPage() {
@@ -67,9 +73,9 @@ export default async function CalculadoraPage() {
         <p className="text-sm font-semibold text-[#90A4AE]">Calculadora</p>
         <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Custos de fabricação</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-[#78909C]">
-          Precifique chapas cortadas a laser, tubos/perfis e a composição final de uma peça — e mande o resultado
-          direto pra um orçamento. Cada módulo tem sua própria aba de Parâmetros, com os valores específicos
-          daquele processo.
+          Precifique chapas cortadas a laser, tubos/perfis, usinagem, soldagem e a composição final de uma peça —
+          além de serviços de desenho técnico e cálculo (CAD/CAE) — e mande o resultado direto pra um orçamento.
+          Cada módulo tem sua própria aba de Parâmetros, com os valores específicos daquele processo.
         </p>
 
         <div className="mt-6 grid gap-4 sm:grid-cols-2">

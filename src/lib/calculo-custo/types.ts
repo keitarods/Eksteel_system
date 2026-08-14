@@ -54,6 +54,7 @@ export const TIPOS_CALCULO = [
   { valor: "torneamento", label: "Torneamento" },
   { valor: "fresamento", label: "Fresamento" },
   { valor: "soldagem", label: "Soldagem" },
+  { valor: "cad_cae", label: "CAD/CAE" },
 ] as const;
 
 export type TipoCalculo = (typeof TIPOS_CALCULO)[number]["valor"];
