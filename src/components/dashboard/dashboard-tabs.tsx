@@ -192,6 +192,7 @@ type MateriaPrima = {
 type ComponenteProduto = {
   id: string;
   produtoId: string;
+  materiaPrimaId: string;
   nomePeca: string;
   quantidade: number;
   linkCompra: string;
@@ -264,6 +265,24 @@ type PedidoCompra = {
   atualizadoPor: string;
   atualizadoEm: string;
 };
+
+// Detalhamento opcional do pedido de compra — um pedido sem itens continua
+// funcionando só com valorTotal digitado na mão (compatível com pedidos já
+// lançados antes dessa feature existir).
+type ItemPedidoCompra = {
+  id: string;
+  pedidoCompraId: string;
+  materiaPrimaId: string;
+  descricao: string;
+  quantidade: number;
+  valorUnitario: number;
+  valorTotal: number;
+};
+
+// Linha em edição (form) — valores como string, igual ao resto do formulário,
+// parseados só na hora de calcular/salvar. materiaPrimaId vazio = item avulso
+// (descrição livre, sem vínculo com o cadastro de matérias-primas).
+type LinhaItemPedido = { id: string; materiaPrimaId: string; descricao: string; quantidade: string; valorUnitario: string };
 
 type DashboardTabsProps = {
   usuarioId: string;
@@ -3361,10 +3380,11 @@ function ComprasModulo({
 }) {
   const [pedidos, setPedidos] = useState<PedidoCompra[]>([]);
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
+  const [materiasPrimas, setMateriasPrimas] = useState<MateriaPrima[]>([]);
   const [usuariosMap, setUsuariosMap] = useState<Record<string, string>>({});
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
-  const [aba, setAba] = useState<"pedidos" | "fabricacao">("fabricacao");
+  const [aba, setAba] = useState<"pedidos" | "fabricacao" | "historico-precos">("fabricacao");
   const [mensagem, setMensagem] = useState("");
   const [erro, setErro] = useState("");
 
@@ -3375,6 +3395,7 @@ function ComprasModulo({
     valorTotal: "",
     observacao: "",
   });
+  const [itensNovoPedido, setItensNovoPedido] = useState<LinhaItemPedido[]>([]);
   const [dividirBalancete, setDividirBalancete] = useState(false);
 
   const [pedidoSelecionado, setPedidoSelecionado] = useState<PedidoCompra | null>(null);
@@ -3387,12 +3408,20 @@ function ComprasModulo({
     valorTotal: "",
     observacao: "",
   });
+  const [itensPedidoSelecionado, setItensPedidoSelecionado] = useState<ItemPedidoCompra[]>([]);
+  const [itensFormDetalhe, setItensFormDetalhe] = useState<LinhaItemPedido[]>([]);
+  const [carregandoItens, setCarregandoItens] = useState(false);
+  // Custo unitário médio de cada pedido (valor total dos itens ÷ soma das
+  // quantidades) — pra mostrar direto na linha da lista, sem abrir o pedido.
+  // Fica de fora (—) pra pedido sem item lançado, já que não tem quantidade
+  // pra dividir.
+  const [custoUnitPorPedido, setCustoUnitPorPedido] = useState<Record<string, number>>({});
 
   useEffect(() => {
     let ativo = true;
     async function carregar() {
       const supabase = createClient();
-      const [{ data: p }, { data: f }, { data: u }] = await Promise.all([
+      const [{ data: p }, { data: f }, { data: u }, { data: mp }, { data: itensTodos }] = await Promise.all([
         supabase
           .from("pedidos_compra")
           .select("*, fornecedores(nome)")
@@ -3404,13 +3433,17 @@ function ComprasModulo({
 
           .order("nome"),
         supabase.from("usuarios_empresa").select("usuario_id, nome, email"),
+        supabase.from("materias_primas").select("*").eq("ativo", true).order("nome"),
+        supabase.from("pedido_compra_itens").select("pedido_compra_id, quantidade, valor_total"),
       ]);
       if (ativo) {
         setPedidos((p ?? []).map(mapPedidoCompra));
         setFornecedores((f ?? []).map(mapFornecedor));
+        setMateriasPrimas((mp ?? []).map(mapMateriaPrima));
         setUsuariosMap(
           Object.fromEntries((u ?? []).map((m) => [String(m.usuario_id), String(m.nome || m.email || "")]))
         );
+        setCustoUnitPorPedido(calcularCustoUnitPorPedido(itensTodos ?? []));
         setCarregando(false);
       }
     }
@@ -3428,6 +3461,8 @@ function ComprasModulo({
     }
     setSalvando(true);
     const supabase = createClient();
+    const itensValidosNovoPedido = itensPreenchidos(itensNovoPedido);
+    const valorTotal = itensValidosNovoPedido.length > 0 ? somaItensPedido(itensValidosNovoPedido) : parseNumero(formPedido.valorTotal);
     const { data, error } = await supabase
       .from("pedidos_compra")
       .insert({
@@ -3435,7 +3470,7 @@ function ComprasModulo({
         fornecedor_id: formPedido.fornecedorId,
         data: formPedido.data,
         status: formPedido.status,
-        valor_total: parseNumero(formPedido.valorTotal),
+        valor_total: valorTotal,
         observacao: formPedido.observacao.trim(),
       })
       .select("*, fornecedores(nome)")
@@ -3444,9 +3479,25 @@ function ComprasModulo({
     if (error) { setSalvando(false); setErro(error.message); return; }
     if (data) setPedidos((prev) => [mapPedidoCompra(data), ...prev]);
 
+    if (data && itensValidosNovoPedido.length > 0) {
+      await supabase.from("pedido_compra_itens").insert(
+        itensValidosNovoPedido.map((item) => ({
+          pedido_compra_id: data.id,
+          materia_prima_id: item.materiaPrimaId || null,
+          descricao: item.descricao,
+          quantidade: parseNumero(item.quantidade) || 1,
+          valor_unitario: parseNumero(item.valorUnitario),
+          valor_total: (parseNumero(item.quantidade) || 1) * parseNumero(item.valorUnitario),
+        }))
+      );
+      const totalQtd = itensValidosNovoPedido.reduce((s, item) => s + (parseNumero(item.quantidade) || 1), 0);
+      if (totalQtd > 0) {
+        setCustoUnitPorPedido((prev) => ({ ...prev, [data.id]: valorTotal / totalQtd }));
+      }
+    }
+
     const fornecedorNome = fornecedores.find((f) => f.id === formPedido.fornecedorId)?.nome ?? "";
     const nomeItem = `Compra${fornecedorNome ? ` - ${fornecedorNome}` : ""}`;
-    const valorTotal = parseNumero(formPedido.valorTotal);
     const avisoBalancete = await lancarCompraNoBalancete({
       dividir: dividirBalancete,
       valorTotal,
@@ -3458,6 +3509,7 @@ function ComprasModulo({
 
     setSalvando(false);
     setFormPedido({ fornecedorId: "", data: dataHoje, status: "pendente", valorTotal: "", observacao: "" });
+    setItensNovoPedido([]);
     setDividirBalancete(false);
     setMensagem(
       avisoBalancete
@@ -3492,7 +3544,7 @@ function ComprasModulo({
     setMensagem("Pedido removido.");
   }
 
-  function abrirDetalhePedido(pedido: PedidoCompra) {
+  async function abrirDetalhePedido(pedido: PedidoCompra) {
     setPedidoSelecionado(pedido);
     setEditandoDetalhe(false);
     setFormDetalhe({
@@ -3502,11 +3554,40 @@ function ComprasModulo({
       valorTotal: String(pedido.valorTotal).replace(".", ","),
       observacao: pedido.observacao,
     });
+    setItensPedidoSelecionado([]);
+    setItensFormDetalhe([]);
+    setCarregandoItens(true);
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("pedido_compra_itens")
+      .select("*")
+      .eq("pedido_compra_id", pedido.id)
+      .order("criado_em");
+    const itens = (data ?? []).map(mapItemPedidoCompra);
+    setItensPedidoSelecionado(itens);
+    // Já deixa uma linha em branco pronta pro editor quando o pedido não tem
+    // item nenhum — direto aqui, e não no clique de "Editar", pra não correr
+    // o risco de a busca assíncrona terminar depois do clique e sobrescrever
+    // a linha recém-adicionada de volta pra vazio.
+    setItensFormDetalhe(itens.length > 0 ? itens.map(itemParaLinha) : [novaLinhaItemPedido()]);
+    setCarregandoItens(false);
   }
 
   function fecharDetalhePedido() {
     setPedidoSelecionado(null);
     setEditandoDetalhe(false);
+  }
+
+  // Ao entrar em edição de um pedido que ainda não tem nenhum item lançado,
+  // já abre uma linha vazia — igual acontece ao clicar em "Adicionar item"
+  // no formulário de lançar um pedido novo, sem exigir esse clique extra.
+  // Se o pedido já tem itens, não mexe (não força linha em cima do que já
+  // foi lançado).
+  function iniciarEdicaoPedido() {
+    setEditandoDetalhe(true);
+    if (itensFormDetalhe.length === 0) {
+      setItensFormDetalhe([novaLinhaItemPedido()]);
+    }
   }
 
   async function handleSalvarDetalhePedido() {
@@ -3520,18 +3601,50 @@ function ComprasModulo({
     const supabase = createClient();
     const fornecedor = fornecedores.find((f) => f.id === formDetalhe.fornecedorId);
     const atualizadoEm = new Date().toISOString();
+    const itensValidosFormDetalhe = itensPreenchidos(itensFormDetalhe);
+    const valorTotal = itensValidosFormDetalhe.length > 0 ? somaItensPedido(itensValidosFormDetalhe) : parseNumero(formDetalhe.valorTotal);
     const payload = {
       fornecedor_id: formDetalhe.fornecedorId,
       data: formDetalhe.data,
       status: formDetalhe.status,
-      valor_total: parseNumero(formDetalhe.valorTotal),
+      valor_total: valorTotal,
       observacao: formDetalhe.observacao.trim(),
       atualizado_por: usuarioId,
       atualizado_em: atualizadoEm,
     };
     const { error } = await supabase.from("pedidos_compra").update(payload).eq("id", pedidoSelecionado.id);
+    if (error) { setSalvandoDetalhe(false); setErro(error.message); return; }
+
+    // Sincroniza os itens: apaga tudo e regrava do zero — lista curta por
+    // pedido, mais simples e seguro do que diffar linha a linha. Linhas em
+    // branco (ex.: a pré-carregada ao entrar em edição, se ficou sem uso)
+    // não são gravadas.
+    await supabase.from("pedido_compra_itens").delete().eq("pedido_compra_id", pedidoSelecionado.id);
+    let itensAtualizados: ItemPedidoCompra[] = [];
+    if (itensValidosFormDetalhe.length > 0) {
+      const { data: itensSalvos } = await supabase
+        .from("pedido_compra_itens")
+        .insert(
+          itensValidosFormDetalhe.map((item) => ({
+            pedido_compra_id: pedidoSelecionado.id,
+            materia_prima_id: item.materiaPrimaId || null,
+            descricao: item.descricao,
+            quantidade: parseNumero(item.quantidade) || 1,
+            valor_unitario: parseNumero(item.valorUnitario),
+            valor_total: (parseNumero(item.quantidade) || 1) * parseNumero(item.valorUnitario),
+          }))
+        )
+        .select();
+      itensAtualizados = (itensSalvos ?? []).map(mapItemPedidoCompra);
+    }
+    const totalQtd = itensValidosFormDetalhe.reduce((s, item) => s + (parseNumero(item.quantidade) || 1), 0);
+    setCustoUnitPorPedido((prev) => {
+      const novo = { ...prev };
+      if (totalQtd > 0) novo[pedidoSelecionado.id] = valorTotal / totalQtd;
+      else delete novo[pedidoSelecionado.id];
+      return novo;
+    });
     setSalvandoDetalhe(false);
-    if (error) { setErro(error.message); return; }
 
     const pedidoAtualizado: PedidoCompra = {
       ...pedidoSelecionado,
@@ -3546,6 +3659,8 @@ function ComprasModulo({
     };
     setPedidos((prev) => prev.map((p) => p.id === pedidoSelecionado.id ? pedidoAtualizado : p));
     setPedidoSelecionado(pedidoAtualizado);
+    setItensPedidoSelecionado(itensAtualizados);
+    setItensFormDetalhe(itensAtualizados.map(itemParaLinha));
     setEditandoDetalhe(false);
     setMensagem("Pedido atualizado.");
   }
@@ -3570,7 +3685,7 @@ function ComprasModulo({
           descricao="Registre pedidos de compra e ordens de fabricação."
         />
         <div className="flex flex-wrap gap-2 rounded-3xl border border-[#333333] bg-[#181818] p-2 self-start">
-          {(["pedidos", "fabricacao"] as const).map((t) => (
+          {(["pedidos", "fabricacao", "historico-precos"] as const).map((t) => (
             <button
               key={t}
               type="button"
@@ -3581,7 +3696,7 @@ function ComprasModulo({
                   : "text-[#90A4AE] hover:bg-[#2a2a2a]"
               }`}
             >
-              {t === "pedidos" ? "Pedidos" : "Fabricação"}
+              {t === "pedidos" ? "Pedidos" : t === "fabricacao" ? "Fabricação" : "Estatísticas"}
             </button>
           ))}
         </div>
@@ -3624,8 +3739,11 @@ function ComprasModulo({
                 options={["pendente", "recebido", "cancelado"]}
                 placeholder=""
               />
-              <CampoCadastro label="Valor total" value={formPedido.valorTotal} onChange={(v) => setFormPedido((f) => ({ ...f, valorTotal: v }))} placeholder="0,00" />
+              {itensPreenchidos(itensNovoPedido).length === 0 && (
+                <CampoCadastro label="Valor total" value={formPedido.valorTotal} onChange={(v) => setFormPedido((f) => ({ ...f, valorTotal: v }))} placeholder="0,00" />
+              )}
               <CampoCadastro label="Observação" value={formPedido.observacao} onChange={(v) => setFormPedido((f) => ({ ...f, observacao: v }))} placeholder="Detalhes do pedido" />
+              <ItensPedidoEditor itens={itensNovoPedido} onChange={setItensNovoPedido} materiasPrimas={materiasPrimas} />
             </div>
 
             <button
@@ -3669,6 +3787,7 @@ function ComprasModulo({
                       <Th>Data</Th>
                       <Th>Fornecedor</Th>
                       <Th>Valor</Th>
+                      <Th>Custo unit.</Th>
                       <Th>Status</Th>
                       <Th>Lançado por</Th>
                     </tr>
@@ -3683,6 +3802,13 @@ function ComprasModulo({
                         <Td>{formatarData(p.data)}</Td>
                         <Td className="font-semibold">{p.fornecedorNome || "-"}</Td>
                         <Td>{formatarMoeda(p.valorTotal)}</Td>
+                        <Td>
+                          {custoUnitPorPedido[p.id] !== undefined ? (
+                            `${formatarMoeda(custoUnitPorPedido[p.id])}/un`
+                          ) : (
+                            <span className="text-[#78909C]">—</span>
+                          )}
+                        </Td>
                         <Td>
                           <select
                             value={p.status}
@@ -3723,11 +3849,14 @@ function ComprasModulo({
         />
       )}
 
+      {aba === "historico-precos" && <HistoricoPrecosModulo materiasPrimas={materiasPrimas} />}
+
       {pedidoSelecionado && (
         <Modal
           titulo={editandoDetalhe ? "Editar pedido de compra" : pedidoSelecionado.fornecedorNome || "Detalhe do pedido"}
           subtitulo="Compras"
           onClose={fecharDetalhePedido}
+          largo
         >
           <FeedbackBloco mensagem="" erro={erro} />
           {editandoDetalhe ? (
@@ -3753,10 +3882,13 @@ function ComprasModulo({
                 options={["pendente", "recebido", "cancelado"]}
                 placeholder=""
               />
-              <CampoCadastro label="Valor total" value={formDetalhe.valorTotal} onChange={(v) => setFormDetalhe((f) => ({ ...f, valorTotal: v }))} />
+              {itensPreenchidos(itensFormDetalhe).length === 0 && (
+                <CampoCadastro label="Valor total" value={formDetalhe.valorTotal} onChange={(v) => setFormDetalhe((f) => ({ ...f, valorTotal: v }))} />
+              )}
               <div className="sm:col-span-2">
                 <CampoCadastro label="Observação" value={formDetalhe.observacao} onChange={(v) => setFormDetalhe((f) => ({ ...f, observacao: v }))} />
               </div>
+              <ItensPedidoEditor itens={itensFormDetalhe} onChange={setItensFormDetalhe} materiasPrimas={materiasPrimas} />
             </div>
           ) : (
             <div>
@@ -3770,6 +3902,44 @@ function ComprasModulo({
               />
               <LinhaDetalhe label="Valor total" valor={formatarMoeda(pedidoSelecionado.valorTotal)} destaque />
               {pedidoSelecionado.observacao && <LinhaDetalhe label="Observação" valor={pedidoSelecionado.observacao} />}
+
+              {carregandoItens && <p className="mt-3 text-xs text-[#78909C]">Carregando itens...</p>}
+              {!carregandoItens && itensPedidoSelecionado.length > 0 && (
+                <div className="mt-4">
+                  <p className="mb-2 text-sm font-semibold text-[#90A4AE]">Itens</p>
+                  <div className="overflow-x-auto rounded-2xl border border-[#2a2a2a]">
+                    <table className="w-full min-w-[420px] text-left text-sm">
+                      <thead className="bg-[#181818] text-[#90A4AE]">
+                        <tr>
+                          <Th>Descrição</Th>
+                          <Th>Qtd.</Th>
+                          <Th>Valor un.</Th>
+                          <Th>Subtotal</Th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {itensPedidoSelecionado.map((item) => (
+                          <tr key={item.id} className="border-t border-[#2a2a2a]">
+                            <Td>{item.descricao}</Td>
+                            <Td>{item.quantidade}</Td>
+                            <Td>{formatarMoeda(item.valorUnitario)}</Td>
+                            <Td className="font-semibold text-[#90A4AE]">{formatarMoeda(item.valorTotal)}</Td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="border-t border-[#2a2a2a] bg-[#181818]">
+                          <Td colSpan={3} className="text-right font-semibold text-[#90A4AE]">Total</Td>
+                          <Td className="font-semibold text-[#90A4AE]">
+                            {formatarMoeda(itensPedidoSelecionado.reduce((s, i) => s + i.valorTotal, 0))}
+                          </Td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              )}
+
               <HistoricoRegistro
                 usuariosMap={usuariosMap}
                 criadoPor={pedidoSelecionado.criadoPor}
@@ -3782,7 +3952,7 @@ function ComprasModulo({
           <ModalAcoes
             editando={editandoDetalhe}
             salvando={salvandoDetalhe}
-            onEditar={() => setEditandoDetalhe(true)}
+            onEditar={iniciarEdicaoPedido}
             onSalvar={handleSalvarDetalhePedido}
             onCancelar={() => setEditandoDetalhe(false)}
             onExcluir={handleExcluirDetalhePedido}
@@ -3791,6 +3961,459 @@ function ComprasModulo({
       )}
     </section>
   );
+}
+
+type PontoPrecoMateriaPrima = {
+  data: string;
+  valorUnitario: number;
+  origem: "compra" | "fabricacao";
+  referencia: string;
+};
+
+// Qual matéria-prima está com o preço em foco no gráfico — id vazio quando
+// veio de um componente de produto sem vínculo (materia_prima_id) com o
+// cadastro, aí só dá pra casar pelo nome da peça (só cobre fabricação).
+type SelecaoPreco = { materiaPrimaId: string; nome: string };
+
+type PontoCustoProduto = { data: string; qtdFabricada: number; valorTotal: number };
+
+const COR_ORIGEM_COMPRA = "#1976D2";
+const COR_ORIGEM_FABRICACAO = "#6A1B9A";
+
+function DotOrigemPreco({ cx, cy, payload }: { cx?: number; cy?: number; payload?: PontoPrecoMateriaPrima }) {
+  if (cx === undefined || cy === undefined || !payload) return null;
+  const cor = payload.origem === "compra" ? COR_ORIGEM_COMPRA : COR_ORIGEM_FABRICACAO;
+  return <circle cx={cx} cy={cy} r={4} fill={cor} stroke="#141414" strokeWidth={1} />;
+}
+
+// Estatísticas de custo — duas portas de entrada pro mesmo gráfico de preço:
+// (1) escolher direto uma matéria-prima, ou (2) escolher um produto e
+// "descer" (drilldown) pros componentes (matérias-primas) daquele produto.
+// Itens de pedido de compra são ligados por materia_prima_id (vínculo
+// confiável); itens de fabricação só têm o nome da peça salvo (sem FK), então
+// o casamento aí é por nome — funciona bem quando o componente do produto foi
+// montado a partir da matéria-prima cadastrada.
+function HistoricoPrecosModulo({ materiasPrimas }: { materiasPrimas: MateriaPrima[] }) {
+  const [modo, setModo] = useState<"produto" | "materia-prima">("produto");
+
+  const [produtos, setProdutos] = useState<Produto[]>([]);
+  const [carregandoProdutos, setCarregandoProdutos] = useState(true);
+  const [produtoId, setProdutoId] = useState("");
+  const [pontosProduto, setPontosProduto] = useState<PontoCustoProduto[]>([]);
+  const [componentes, setComponentes] = useState<ComponenteProduto[]>([]);
+  const [carregandoProduto, setCarregandoProduto] = useState(false);
+
+  const [selecao, setSelecao] = useState<SelecaoPreco | null>(null);
+  const [pontosPreco, setPontosPreco] = useState<PontoPrecoMateriaPrima[]>([]);
+  const [carregandoPreco, setCarregandoPreco] = useState(false);
+  const [erro, setErro] = useState("");
+
+  // "Ver todas de uma vez": clicando no gráfico do produto, busca o histórico
+  // de preço de cada matéria-prima da BOM em paralelo e mostra um mini-gráfico
+  // por componente, sem precisar clicar chip por chip.
+  const [precosPorComponente, setPrecosPorComponente] = useState<Record<string, PontoPrecoMateriaPrima[]>>({});
+  const [carregandoTodos, setCarregandoTodos] = useState(false);
+  const [mostrarTodos, setMostrarTodos] = useState(false);
+
+  useEffect(() => {
+    let ativo = true;
+    async function carregar() {
+      const supabase = createClient();
+      const { data } = await supabase.from("produtos").select("*").eq("ativo", true).order("nome");
+      if (ativo) {
+        setProdutos((data ?? []).map(mapProduto));
+        setCarregandoProdutos(false);
+      }
+    }
+    carregar();
+    return () => { ativo = false; };
+  }, []);
+
+  useEffect(() => {
+    let ativo = true;
+    async function carregar() {
+      setMostrarTodos(false);
+      setPrecosPorComponente({});
+      if (!produtoId) { setPontosProduto([]); setComponentes([]); return; }
+      setCarregandoProduto(true);
+      const supabase = createClient();
+      const [{ data: fab }, { data: comp }] = await Promise.all([
+        supabase.from("pedidos_fabricacao").select("data, qtd_fabricada, valor_total").eq("produto_id", produtoId).order("data"),
+        supabase.from("componentes_produto").select("*").eq("produto_id", produtoId).order("nome_peca"),
+      ]);
+      if (!ativo) return;
+      setPontosProduto(
+        (fab ?? []).map((r) => ({ data: String(r.data ?? ""), qtdFabricada: Number(r.qtd_fabricada ?? 0), valorTotal: Number(r.valor_total ?? 0) }))
+      );
+      const comps = (comp ?? []).map(mapComponente);
+      setComponentes(comps);
+      setCarregandoProduto(false);
+
+      // Já mostra a variação de preço de todas as matérias-primas por
+      // padrão, sem precisar de um clique extra no gráfico.
+      if (comps.length > 0) {
+        setMostrarTodos(true);
+        setCarregandoTodos(true);
+        const resultados = await Promise.all(
+          comps.map((c) => buscarHistoricoPreco(supabase, { materiaPrimaId: c.materiaPrimaId, nome: c.nomePeca }))
+        );
+        if (!ativo) return;
+        const mapa: Record<string, PontoPrecoMateriaPrima[]> = {};
+        comps.forEach((c, i) => { mapa[c.id] = resultados[i].pontos; });
+        setPrecosPorComponente(mapa);
+        setCarregandoTodos(false);
+      }
+    }
+    carregar();
+    return () => { ativo = false; };
+  }, [produtoId]);
+
+  useEffect(() => {
+    let ativo = true;
+    async function carregar() {
+      if (!selecao) { setPontosPreco([]); return; }
+      setCarregandoPreco(true);
+      setErro("");
+      const supabase = createClient();
+      const { pontos, erro: erroBusca } = await buscarHistoricoPreco(supabase, selecao);
+      if (!ativo) return;
+      if (erroBusca) setErro(erroBusca);
+      setPontosPreco(pontos);
+      setCarregandoPreco(false);
+    }
+    carregar();
+    return () => { ativo = false; };
+  }, [selecao?.materiaPrimaId, selecao?.nome]);
+
+  async function verVariacaoDeTodasAsMateriasPrimas() {
+    setMostrarTodos(true);
+    if (componentes.length === 0 || carregandoTodos) return;
+    setCarregandoTodos(true);
+    const supabase = createClient();
+    const resultados = await Promise.all(
+      componentes.map((comp) => buscarHistoricoPreco(supabase, { materiaPrimaId: comp.materiaPrimaId, nome: comp.nomePeca }))
+    );
+    const mapa: Record<string, PontoPrecoMateriaPrima[]> = {};
+    componentes.forEach((comp, i) => { mapa[comp.id] = resultados[i].pontos; });
+    setPrecosPorComponente(mapa);
+    setCarregandoTodos(false);
+  }
+
+  function selecionarComponente(comp: ComponenteProduto) {
+    setSelecao({ materiaPrimaId: comp.materiaPrimaId, nome: comp.nomePeca });
+  }
+
+  const dadosGraficoProduto = [...pontosProduto]
+    .sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0))
+    .map((p) => ({ name: formatarData(p.data), custo: p.qtdFabricada > 0 ? p.valorTotal / p.qtdFabricada : 0 }));
+
+  const dadosGraficoPreco = [...pontosPreco]
+    .sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0))
+    .map((p) => ({ name: formatarData(p.data), valorUnitario: p.valorUnitario, origem: p.origem, referencia: p.referencia }));
+
+  const valoresPreco = pontosPreco.map((p) => p.valorUnitario);
+  const menor = valoresPreco.length > 0 ? Math.min(...valoresPreco) : 0;
+  const maior = valoresPreco.length > 0 ? Math.max(...valoresPreco) : 0;
+  const media = valoresPreco.length > 0 ? valoresPreco.reduce((s, v) => s + v, 0) / valoresPreco.length : 0;
+
+  return (
+    <div className="mt-6 space-y-6">
+      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <SectionHeader
+            tag="Compras"
+            titulo="Estatísticas de custo"
+            descricao="Custo por unidade fabricada de um produto, com drilldown pras matérias-primas usadas — ou veja direto o histórico de preço de uma matéria-prima."
+          />
+          <div className="flex flex-wrap gap-2 rounded-3xl border border-[#333333] bg-[#181818] p-2 self-start">
+            {(["produto", "materia-prima"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => { setModo(m); setSelecao(null); }}
+                className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
+                  modo === m ? "bg-[#546E7A] text-white" : "text-[#90A4AE] hover:bg-[#2a2a2a]"
+                }`}
+              >
+                {m === "produto" ? "Por produto" : "Por matéria-prima"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {modo === "produto" ? (
+          <div className="mt-5">
+            <div className="max-w-sm">
+              <label className="mb-1 block text-sm font-medium">Produto</label>
+              <select
+                value={produtoId}
+                onChange={(e) => { setProdutoId(e.target.value); setSelecao(null); }}
+                className="w-full rounded-2xl border border-[#333333] bg-[#181818] px-4 py-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+              >
+                <option value="">{carregandoProdutos ? "Carregando..." : "Selecione..."}</option>
+                {produtos.map((p) => (
+                  <option key={p.id} value={p.id}>{p.codigo ? `${p.codigo} — ` : ""}{p.nome}</option>
+                ))}
+              </select>
+            </div>
+
+            {produtoId && (
+              carregandoProduto ? (
+                <p className="mt-5 text-sm text-[#78909C]">Carregando...</p>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between">
+                    <p className="mb-2 mt-5 text-sm font-semibold text-[#90A4AE]">Custo por unidade fabricada</p>
+                    {componentes.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={verVariacaoDeTodasAsMateriasPrimas}
+                        disabled={carregandoTodos}
+                        className="mb-2 mt-5 inline-flex h-8 items-center gap-1 rounded-xl border border-[#333333] bg-[#212121] px-2 text-xs font-semibold text-[#546E7A] hover:bg-[#2a2a2a] disabled:opacity-60"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" /> Atualizar variação
+                      </button>
+                    )}
+                  </div>
+                  {dadosGraficoProduto.length > 0 ? (
+                    <div className="h-56">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={dadosGraficoProduto}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" />
+                          <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                          <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `R$${Number(v).toFixed(0)}`} />
+                          <Tooltip formatter={(v) => formatarMoeda(Number(v))} />
+                          <Line type="monotone" dataKey="custo" stroke="#1976D2" strokeWidth={2} dot={{ r: 3 }} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <p className="py-6 text-center text-sm text-[#78909C]">Nenhum pedido de fabricação registrado pra esse produto ainda.</p>
+                  )}
+
+                  <p className="mb-2 mt-6 text-sm font-semibold text-[#90A4AE]">
+                    Matérias-primas usadas — clique numa pra focar o histórico dela sozinha
+                  </p>
+                  {componentes.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {componentes.map((comp) => (
+                        <button
+                          key={comp.id}
+                          type="button"
+                          onClick={() => selecionarComponente(comp)}
+                          className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                            selecao?.nome === comp.nomePeca
+                              ? "border-[#546E7A] bg-[#546E7A]/20 text-[#ECEFF1]"
+                              : "border-[#333333] bg-[#181818] text-[#90A4AE] hover:bg-[#2a2a2a]"
+                          }`}
+                        >
+                          {comp.nomePeca}
+                          {!comp.materiaPrimaId && <span className="ml-1 text-[#78909C]">(sem vínculo)</span>}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-[#78909C]">Esse produto não tem matérias-primas cadastradas na BOM.</p>
+                  )}
+
+                  {mostrarTodos && (
+                    <div className="mt-6">
+                      <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Variação de preço — todas as matérias-primas</p>
+                      {carregandoTodos ? (
+                        <p className="text-sm text-[#78909C]">Carregando...</p>
+                      ) : (
+                        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                          {componentes.map((comp) => {
+                            const pontosComp = precosPorComponente[comp.id] ?? [];
+                            const dadosMini = [...pontosComp]
+                              .sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0))
+                              .map((p) => ({ name: formatarData(p.data), valorUnitario: p.valorUnitario, origem: p.origem }));
+                            return (
+                              <button
+                                key={comp.id}
+                                type="button"
+                                onClick={() => selecionarComponente(comp)}
+                                className="rounded-2xl border border-[#2a2a2a] bg-[#141414] p-3 text-left transition hover:border-[#546E7A]"
+                              >
+                                <p className="truncate text-xs font-semibold text-[#90A4AE]">{comp.nomePeca}</p>
+                                {dadosMini.length > 0 ? (
+                                  <div className="mt-2 h-24">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                      <LineChart data={dadosMini}>
+                                        <Tooltip formatter={(v) => formatarMoeda(Number(v))} />
+                                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                                        <Line type="monotone" dataKey="valorUnitario" stroke="#546E7A" strokeWidth={2} dot={DotOrigemPreco as any} />
+                                      </LineChart>
+                                    </ResponsiveContainer>
+                                  </div>
+                                ) : (
+                                  <p className="mt-2 py-6 text-center text-xs text-[#78909C]">Sem preço registrado ainda.</p>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )
+            )}
+          </div>
+        ) : (
+          <div className="mt-5 max-w-sm">
+            <label className="mb-1 block text-sm font-medium">Matéria-prima</label>
+            <select
+              value={selecao?.materiaPrimaId ?? ""}
+              onChange={(e) => {
+                const mp = materiasPrimas.find((m) => m.id === e.target.value);
+                setSelecao(mp ? { materiaPrimaId: mp.id, nome: mp.nome } : null);
+              }}
+              className="w-full rounded-2xl border border-[#333333] bg-[#181818] px-4 py-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+            >
+              <option value="">{materiasPrimas.length === 0 ? "Nenhuma matéria-prima cadastrada" : "Selecione..."}</option>
+              {materiasPrimas.map((mp) => (
+                <option key={mp.id} value={mp.id}>{mp.codigo ? `${mp.codigo} — ` : ""}{mp.nome}</option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+
+      {selecao && (
+        <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-[#90A4AE]">Histórico de preço</p>
+              <h3 className="mt-1 text-lg font-bold">{selecao.nome}</h3>
+            </div>
+            {modo === "produto" && (
+              <button
+                type="button"
+                onClick={() => setSelecao(null)}
+                className="inline-flex h-9 items-center gap-1 rounded-xl border border-[#333333] bg-[#181818] px-3 text-xs font-semibold text-[#546E7A] hover:bg-[#2a2a2a]"
+              >
+                ← Voltar aos componentes
+              </button>
+            )}
+          </div>
+
+          {erro && <p className="mt-3 text-sm text-amber-400">{erro}</p>}
+
+          {carregandoPreco ? (
+            <p className="mt-5 text-sm text-[#78909C]">Carregando histórico...</p>
+          ) : pontosPreco.length === 0 ? (
+            <p className="mt-5 text-sm text-[#78909C]">Nenhum preço registrado ainda (nem em compras, nem em fabricação).</p>
+          ) : (
+            <>
+              <div className="mt-5 grid grid-cols-3 gap-3">
+                <KpiCard titulo="Menor preço" valor={formatarMoeda(menor)} />
+                <KpiCard titulo="Preço médio" valor={formatarMoeda(media)} />
+                <KpiCard titulo="Maior preço" valor={formatarMoeda(maior)} />
+              </div>
+
+              <div className="mt-5 h-56">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={dadosGraficoPreco}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" />
+                    <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                    <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `R$${Number(v).toFixed(0)}`} />
+                    <Tooltip
+                      formatter={(v, _n, item) => [formatarMoeda(Number(v)), item?.payload?.origem === "compra" ? "Compra" : "Fabricação"]}
+                    />
+                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                    <Line type="monotone" dataKey="valorUnitario" stroke="#546E7A" strokeWidth={2} dot={DotOrigemPreco as any} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="mt-2 flex items-center gap-4 text-xs text-[#78909C]">
+                <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: COR_ORIGEM_COMPRA }} /> Compra</span>
+                <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: COR_ORIGEM_FABRICACAO }} /> Fabricação</span>
+              </div>
+
+              <div className="mt-5 overflow-x-auto rounded-2xl border border-[#2a2a2a]">
+                <table className="min-w-[480px] w-full text-left text-sm">
+                  <thead className="bg-[#181818] text-[#90A4AE]">
+                    <tr><Th>Data</Th><Th>Origem</Th><Th>Referência</Th><Th>Preço unitário</Th></tr>
+                  </thead>
+                  <tbody>
+                    {pontosPreco.map((p, i) => (
+                      <tr key={i} className="border-t border-[#2a2a2a]">
+                        <Td>{formatarData(p.data)}</Td>
+                        <Td className="text-xs text-[#78909C]">{p.origem === "compra" ? "Compra" : "Fabricação"}</Td>
+                        <Td>{p.referencia}</Td>
+                        <Td className="font-semibold text-[#90A4AE]">{formatarMoeda(p.valorUnitario)}</Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapPontoPrecoCompra(r: any): PontoPrecoMateriaPrima {
+  return {
+    data: String(r.pedidos_compra?.data ?? ""),
+    valorUnitario: Number(r.valor_unitario ?? 0),
+    origem: "compra",
+    referencia: r.pedidos_compra?.fornecedores?.nome || "—",
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapPontoPrecoFabricacao(r: any): PontoPrecoMateriaPrima {
+  return {
+    data: String(r.pedidos_fabricacao?.data ?? ""),
+    valorUnitario: Number(r.preco_unitario ?? 0),
+    origem: "fabricacao",
+    referencia: r.fornecedor_nome || "Fabricação",
+  };
+}
+
+// Busca combinada usada tanto pro gráfico único (uma matéria-prima escolhida)
+// quanto pro modo "ver todas de uma vez" (um por componente do produto) — pra
+// não duplicar a lógica de juntar compra + fabricação e tratar erro.
+async function buscarHistoricoPreco(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  selecao: SelecaoPreco
+): Promise<{ pontos: PontoPrecoMateriaPrima[]; erro: string | null }> {
+  const buscaFab = supabase
+    .from("itens_fabricacao")
+    .select("preco_unitario, fornecedor_nome, pedidos_fabricacao(data)")
+    .eq("nome_peca", selecao.nome);
+  const buscaCompra = selecao.materiaPrimaId
+    ? supabase
+        .from("pedido_compra_itens")
+        .select("valor_unitario, pedidos_compra(data, fornecedores(nome))")
+        .eq("materia_prima_id", selecao.materiaPrimaId)
+    : null;
+
+  const [{ data: fab, error: errFab }, resCompra] = await Promise.all([
+    buscaFab,
+    buscaCompra ?? Promise.resolve({ data: [] as unknown[], error: null }),
+  ]);
+
+  const pontosFab = errFab ? [] : (fab ?? []).map(mapPontoPrecoFabricacao).filter((p: PontoPrecoMateriaPrima) => p.data);
+  const pontosCompra = resCompra.error ? [] : (resCompra.data ?? []).map(mapPontoPrecoCompra).filter((p: PontoPrecoMateriaPrima) => p.data);
+
+  let erro: string | null = null;
+  if (resCompra.error) {
+    erro = resCompra.error.message.includes("does not exist")
+      ? "Falta rodar a migration que adiciona materia_prima_id em pedido_compra_itens — mostrando por enquanto só o histórico de fabricação."
+      : resCompra.error.message;
+  } else if (errFab) {
+    erro = errFab.message;
+  }
+
+  const pontos = [...pontosCompra, ...pontosFab].sort((a, b) => (a.data < b.data ? 1 : a.data > b.data ? -1 : 0));
+  return { pontos, erro };
 }
 
 // ─── Fabricação ───────────────────────────────────────────────────────────────
@@ -3824,6 +4447,12 @@ function FabricacaoSubModulo({
 
   const [pedidoSelecionado, setPedidoSelecionado] = useState<PedidoFabricacao | null>(null);
   const [itensDetalhe, setItensDetalhe] = useState<ItemFabricacao[]>([]);
+  // Só preço e fornecedor do item já lançado são editáveis — quantidade e
+  // peça ficam travadas porque são elas que afetam o estoque (ver aviso na
+  // tela). Corrigir isso não mexe em nenhum saldo de estoque, só no custo/
+  // fornecedor registrado do pedido.
+  const [itensPrecoForm, setItensPrecoForm] = useState<Record<string, string>>({});
+  const [itensFornecedorForm, setItensFornecedorForm] = useState<Record<string, string>>({});
   const [carregandoItensDetalhe, setCarregandoItensDetalhe] = useState(false);
   const [editandoDetalhe, setEditandoDetalhe] = useState(false);
   const [salvandoDetalhe, setSalvandoDetalhe] = useState(false);
@@ -3978,8 +4607,11 @@ function FabricacaoSubModulo({
     setFormDetalhe({ data: pedido.data, observacao: pedido.observacao });
     setCarregandoItensDetalhe(true);
     const supabase = createClient();
-    const { data } = await supabase.from("itens_fabricacao").select("*").eq("pedido_id", pedido.id).order("created_at");
-    setItensDetalhe((data ?? []).map(mapItemFabricacao));
+    const { data } = await supabase.from("itens_fabricacao").select("*").eq("pedido_id", pedido.id).order("nome_peca");
+    const itens = (data ?? []).map(mapItemFabricacao);
+    setItensDetalhe(itens);
+    setItensPrecoForm(Object.fromEntries(itens.map((it) => [it.id, String(it.precoUnitario).replace(".", ",")])));
+    setItensFornecedorForm(Object.fromEntries(itens.map((it) => [it.id, it.fornecedorNome])));
     setCarregandoItensDetalhe(false);
   }
 
@@ -3995,13 +4627,34 @@ function FabricacaoSubModulo({
     setSalvandoDetalhe(true);
     setErro("");
     const supabase = createClient();
-    const payload = { data: formDetalhe.data, observacao: formDetalhe.observacao.trim() };
+
+    // Corrige preço unitário/total e fornecedor de cada item que mudou — sem
+    // tocar em qtd_pc/qtd_total/nome_peca, que são o que afeta o estoque.
+    const itensAtualizados = itensDetalhe.map((item) => {
+      const novoPrecoUnitario = parseNumero(itensPrecoForm[item.id] ?? String(item.precoUnitario));
+      const novoFornecedorNome = itensFornecedorForm[item.id] ?? item.fornecedorNome;
+      return { ...item, precoUnitario: novoPrecoUnitario, precoTotal: item.qtdTotal * novoPrecoUnitario, fornecedorNome: novoFornecedorNome };
+    });
+    const itensAlterados = itensAtualizados.filter(
+      (item, i) => item.precoUnitario !== itensDetalhe[i].precoUnitario || item.fornecedorNome !== itensDetalhe[i].fornecedorNome
+    );
+    for (const item of itensAlterados) {
+      const { error: errItem } = await supabase
+        .from("itens_fabricacao")
+        .update({ preco_unitario: item.precoUnitario, preco_total: item.precoTotal, fornecedor_nome: item.fornecedorNome })
+        .eq("id", item.id);
+      if (errItem) { setSalvandoDetalhe(false); setErro(errItem.message); return; }
+    }
+    const novoValorTotal = itensAtualizados.reduce((s, item) => s + item.precoTotal, 0);
+
+    const payload = { data: formDetalhe.data, observacao: formDetalhe.observacao.trim(), valor_total: novoValorTotal };
     const { error } = await supabase.from("pedidos_fabricacao").update(payload).eq("id", pedidoSelecionado.id);
     setSalvandoDetalhe(false);
     if (error) { setErro(error.message); return; }
-    const atualizado: PedidoFabricacao = { ...pedidoSelecionado, ...payload };
+    const atualizado: PedidoFabricacao = { ...pedidoSelecionado, data: payload.data, observacao: payload.observacao, valorTotal: novoValorTotal };
     setPedidos((prev) => prev.map((p) => p.id === pedidoSelecionado.id ? atualizado : p));
     setPedidoSelecionado(atualizado);
+    setItensDetalhe(itensAtualizados);
     setEditandoDetalhe(false);
     setMensagem("Pedido de fabricação atualizado.");
   }
@@ -4176,6 +4829,7 @@ function FabricacaoSubModulo({
                     <Th>Data</Th>
                     <Th>Produto</Th>
                     <Th>Qtd fabricada</Th>
+                    <Th>Custo unit.</Th>
                     <Th>Custo total</Th>
                     <Th>Lançado por</Th>
                   </tr>
@@ -4190,6 +4844,13 @@ function FabricacaoSubModulo({
                       <Td>{formatarData(p.data)}</Td>
                       <Td className="font-semibold">{p.produtoNome}</Td>
                       <Td>{p.qtdFabricada}</Td>
+                      <Td>
+                        {p.qtdFabricada > 0 ? (
+                          `${formatarMoeda(p.valorTotal / p.qtdFabricada)}/un`
+                        ) : (
+                          <span className="text-[#78909C]">—</span>
+                        )}
+                      </Td>
                       <Td className="font-semibold text-[#90A4AE]">{formatarMoeda(p.valorTotal)}</Td>
                       <Td className="text-xs text-[#78909C]">{nomeUsuario(usuariosMap, p.criadoPor)}</Td>
                     </tr>
@@ -4218,8 +4879,53 @@ function FabricacaoSubModulo({
                 <CampoCadastro label="Observação" value={formDetalhe.observacao} onChange={(v) => setFormDetalhe((f) => ({ ...f, observacao: v }))} />
               </div>
               <p className="sm:col-span-2 text-xs text-[#78909C]">
-                Produto, quantidade fabricada e itens usados não podem ser editados aqui — eles afetam o estoque. Para corrigir, exclua este pedido e registre novamente.
+                Produto, quantidade fabricada e peça de cada item não podem ser editados aqui — eles afetam o estoque. Para corrigir isso, exclua este pedido e registre novamente. Preço e fornecedor de cada item podem ser corrigidos abaixo, sem mexer no estoque.
               </p>
+
+              {itensDetalhe.length > 0 && (
+                <div className="sm:col-span-2">
+                  <p className="mb-2 text-sm font-semibold text-[#90A4AE]">Corrigir preço e fornecedor dos itens usados</p>
+                  <div className="overflow-x-auto rounded-2xl border border-[#2a2a2a]">
+                    <table className="min-w-[560px] w-full text-left text-xs">
+                      <thead className="bg-[#181818] text-[#90A4AE]">
+                        <tr><Th>Peça</Th><Th>Qtd total</Th><Th>Fornecedor</Th><Th>Preço unit.</Th><Th>Preço total</Th></tr>
+                      </thead>
+                      <tbody>
+                        {itensDetalhe.map((item) => {
+                          const precoUnitario = parseNumero(itensPrecoForm[item.id] ?? "0");
+                          return (
+                            <tr key={item.id} className="border-t border-[#2a2a2a]">
+                              <Td className="font-semibold">{item.nomePeca}</Td>
+                              <Td>{item.qtdTotal}</Td>
+                              <Td>
+                                <select
+                                  value={itensFornecedorForm[item.id] ?? ""}
+                                  onChange={(e) => setItensFornecedorForm((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                                  className="h-8 w-36 rounded-lg border border-[#333333] bg-[#141414] px-2 text-xs text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+                                >
+                                  <option value="">—</option>
+                                  {fornecedores.map((f) => (
+                                    <option key={f.id} value={f.nome}>{f.nome}</option>
+                                  ))}
+                                </select>
+                              </Td>
+                              <Td>
+                                <input
+                                  type="text"
+                                  value={itensPrecoForm[item.id] ?? ""}
+                                  onChange={(e) => setItensPrecoForm((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                                  className="h-8 w-24 rounded-lg border border-[#333333] bg-[#141414] px-2 text-xs text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+                                />
+                              </Td>
+                              <Td>{formatarMoeda(item.qtdTotal * precoUnitario)}</Td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div>
@@ -4942,6 +5648,120 @@ function EstadoCarregando({ texto }: { texto: string }) {
   );
 }
 
+// Itens opcionais de um pedido de compra — cada linha pode vir do cadastro de
+// matérias-primas (puxa nome e custo de referência automaticamente, editável
+// depois porque o preço da compra real pode variar) ou ser um item avulso com
+// descrição livre. Quantidade × valor unitário soma pro valor total do
+// pedido. Reaproveitado tanto no formulário de "Novo pedido" quanto na
+// edição do detalhe, pra não duplicar a UI de adicionar/remover linha.
+function ItensPedidoEditor({
+  itens,
+  onChange,
+  materiasPrimas,
+}: {
+  itens: LinhaItemPedido[];
+  onChange: (itens: LinhaItemPedido[]) => void;
+  materiasPrimas: MateriaPrima[];
+}) {
+  function atualizar(id: string, campo: "descricao" | "quantidade" | "valorUnitario", valor: string) {
+    onChange(itens.map((i) => (i.id === id ? { ...i, [campo]: valor } : i)));
+  }
+  function remover(id: string) {
+    onChange(itens.filter((i) => i.id !== id));
+  }
+  function adicionar() {
+    onChange([...itens, novaLinhaItemPedido()]);
+  }
+  function selecionarMateriaPrima(id: string, materiaPrimaId: string) {
+    const mp = materiasPrimas.find((m) => m.id === materiaPrimaId);
+    onChange(
+      itens.map((i) =>
+        i.id === id
+          ? {
+              ...i,
+              materiaPrimaId,
+              descricao: mp ? mp.nome : i.descricao,
+              valorUnitario: mp ? String(mp.custo).replace(".", ",") : i.valorUnitario,
+            }
+          : i
+      )
+    );
+  }
+
+  return (
+    <div className="sm:col-span-2">
+      <div className="flex items-center justify-between">
+        <label className="block text-sm font-medium">Itens (opcional — some ao valor total)</label>
+        <button
+          type="button"
+          onClick={adicionar}
+          className="inline-flex h-8 items-center gap-1 rounded-xl border border-[#333333] bg-[#212121] px-2 text-xs font-semibold text-[#546E7A] hover:bg-[#2a2a2a]"
+        >
+          <Plus className="h-3.5 w-3.5" /> Adicionar item
+        </button>
+      </div>
+      {itens.map((item) => (
+        <div key={item.id} className="mt-2 rounded-xl border border-[#333333] bg-[#141414] p-2">
+          <div className="flex flex-wrap gap-2">
+            <select
+              value={item.materiaPrimaId}
+              onChange={(e) => selecionarMateriaPrima(item.id, e.target.value)}
+              className="h-9 min-w-[180px] flex-1 rounded-xl border border-[#333333] bg-[#181818] px-2 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+            >
+              <option value="">Item avulso (digitar descrição)</option>
+              {materiasPrimas.map((mp) => (
+                <option key={mp.id} value={mp.id}>
+                  {mp.codigo ? `${mp.codigo} — ` : ""}{mp.nome}
+                </option>
+              ))}
+            </select>
+            {!item.materiaPrimaId && (
+              <input
+                type="text"
+                value={item.descricao}
+                onChange={(e) => atualizar(item.id, "descricao", e.target.value)}
+                placeholder="Descrição"
+                className="h-9 min-w-[160px] flex-1 rounded-xl border border-[#333333] bg-[#181818] px-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+              />
+            )}
+            <input
+              type="text"
+              value={item.quantidade}
+              onChange={(e) => atualizar(item.id, "quantidade", e.target.value)}
+              placeholder="Qtd"
+              className="h-9 w-16 rounded-xl border border-[#333333] bg-[#181818] px-2 text-center text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+            />
+            <input
+              type="text"
+              value={item.valorUnitario}
+              onChange={(e) => atualizar(item.id, "valorUnitario", e.target.value)}
+              placeholder="R$ un."
+              className="h-9 w-24 rounded-xl border border-[#333333] bg-[#181818] px-2 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+            />
+            <button
+              type="button"
+              onClick={() => remover(item.id)}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-red-900/50 text-red-400 hover:bg-red-900/20"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          {item.materiaPrimaId && (
+            <p className="mt-1.5 text-xs text-[#78909C]">
+              {item.descricao} — valor unitário puxado do cadastro, editável se o preço dessa compra for diferente.
+            </p>
+          )}
+        </div>
+      ))}
+      {itens.length > 0 && (
+        <p className="mt-2 text-right text-sm font-semibold text-[#90A4AE]">
+          Soma dos itens: {formatarMoeda(somaItensPedido(itens))}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function FeedbackBloco({
   mensagem,
   erro,
@@ -5164,6 +5984,7 @@ function mapComponente(r: any): ComponenteProduto {
   return {
     id: String(r.id),
     produtoId: String(r.produto_id ?? ""),
+    materiaPrimaId: String(r.materia_prima_id ?? ""),
     nomePeca: String(r.nome_peca ?? ""),
     quantidade: Number(r.quantidade ?? 1),
     linkCompra: String(r.link_compra ?? ""),
@@ -5328,6 +6149,66 @@ function mapPedidoCompra(r: any): PedidoCompra {
     atualizadoPor: String(r.atualizado_por ?? ""),
     atualizadoEm: String(r.atualizado_em ?? ""),
   };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapItemPedidoCompra(r: any): ItemPedidoCompra {
+  return {
+    id: String(r.id),
+    pedidoCompraId: String(r.pedido_compra_id ?? ""),
+    materiaPrimaId: String(r.materia_prima_id ?? ""),
+    descricao: String(r.descricao ?? ""),
+    quantidade: Number(r.quantidade ?? 1),
+    valorUnitario: Number(r.valor_unitario ?? 0),
+    valorTotal: Number(r.valor_total ?? 0),
+  };
+}
+
+function novaLinhaItemPedido(): LinhaItemPedido {
+  return { id: crypto.randomUUID(), materiaPrimaId: "", descricao: "", quantidade: "1", valorUnitario: "0" };
+}
+
+function itemParaLinha(item: ItemPedidoCompra): LinhaItemPedido {
+  return {
+    id: item.id,
+    materiaPrimaId: item.materiaPrimaId,
+    descricao: item.descricao,
+    quantidade: String(item.quantidade),
+    valorUnitario: String(item.valorUnitario).replace(".", ","),
+  };
+}
+
+// Ignora linhas em branco (descrição vazia) — importante porque uma linha
+// vazia pode ter sido pré-carregada automaticamente (ver iniciarEdicaoPedido)
+// sem o usuário ter escolhido nada ainda; não pode contar como "tem item"
+// nem zerar o valor total de um pedido que já tinha um valor salvo.
+function itensPreenchidos(itens: LinhaItemPedido[]): LinhaItemPedido[] {
+  return itens.filter((i) => i.descricao.trim().length > 0);
+}
+
+function somaItensPedido(itens: LinhaItemPedido[]): number {
+  return itensPreenchidos(itens).reduce((s, i) => s + parseNumero(i.quantidade) * parseNumero(i.valorUnitario), 0);
+}
+
+// Custo unitário médio por pedido = soma do valor_total dos itens ÷ soma das
+// quantidades — usado na linha da lista de Pedidos, sem precisar abrir cada um.
+function calcularCustoUnitPorPedido(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  itens: any[]
+): Record<string, number> {
+  const acumulado: Record<string, { qtd: number; valor: number }> = {};
+  itens.forEach((item) => {
+    const pedidoId = String(item.pedido_compra_id ?? "");
+    if (!pedidoId) return;
+    if (!acumulado[pedidoId]) acumulado[pedidoId] = { qtd: 0, valor: 0 };
+    acumulado[pedidoId].qtd += Number(item.quantidade ?? 0);
+    acumulado[pedidoId].valor += Number(item.valor_total ?? 0);
+  });
+  const resultado: Record<string, number> = {};
+  Object.entries(acumulado).forEach(([pedidoId, { qtd, valor }]) => {
+    if (qtd > 0) resultado[pedidoId] = valor / qtd;
+  });
+  return resultado;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
