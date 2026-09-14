@@ -13,12 +13,12 @@ export default function AbasModulo({
 
   return (
     <div>
-      <div className="mb-5 flex w-fit gap-2 rounded-2xl border border-[#333333] bg-[#181818] p-1.5">
+      <div className="mb-5 flex w-fit gap-2 rounded-lg border border-line bg-surface p-1.5">
         <button
           type="button"
           onClick={() => setAba("calculadora")}
           className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
-            aba === "calculadora" ? "bg-[#546E7A] text-white" : "text-[#90A4AE] hover:bg-[#2a2a2a]"
+            aba === "calculadora" ? "bg-accent text-background" : "text-steel hover:bg-panel-hover"
           }`}
         >
           Calculadora
@@ -27,7 +27,7 @@ export default function AbasModulo({
           type="button"
           onClick={() => setAba("parametros")}
           className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
-            aba === "parametros" ? "bg-[#546E7A] text-white" : "text-[#90A4AE] hover:bg-[#2a2a2a]"
+            aba === "parametros" ? "bg-accent text-background" : "text-steel hover:bg-panel-hover"
           }`}
         >
           Parâmetros

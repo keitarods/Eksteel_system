@@ -45,7 +45,7 @@ export default function PerfisParametrosForm({
     <div className="flex flex-col gap-5">
       <FeedbackBloco mensagem={mensagem} erro={erro} />
 
-      <div className="rounded-2xl border border-[#2a2a2a] bg-[#141414] p-3 text-xs text-[#78909C]">
+      <div className="rounded-lg border border-panel-hover bg-background p-3 text-xs text-muted">
         Preço e densidade aqui são específicos de tubo/perfil (metalon) — diferentes do preço de chapa, já que o
         processo de conformação/solda do tubo tem custo próprio. Um perfil do catálogo com preço de referência
         próprio (R$/metro) ignora esses valores.
@@ -53,7 +53,7 @@ export default function PerfisParametrosForm({
 
       {GRUPOS.map((grupo) => (
         <Cartao key={grupo.titulo}>
-          <p className="mb-3 text-sm font-semibold text-[#90A4AE]">{grupo.titulo}</p>
+          <p className="mb-3 text-sm font-semibold text-steel">{grupo.titulo}</p>
           <div className="grid gap-4 sm:grid-cols-3">
             {grupo.chaves.map((chave) => (
               <Campo

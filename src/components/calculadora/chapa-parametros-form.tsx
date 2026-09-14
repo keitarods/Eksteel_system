@@ -66,7 +66,7 @@ export default function ChapaParametrosForm({
 
       {GRUPOS.map((grupo) => (
         <Cartao key={grupo.titulo}>
-          <p className="mb-3 text-sm font-semibold text-[#90A4AE]">{grupo.titulo}</p>
+          <p className="mb-3 text-sm font-semibold text-steel">{grupo.titulo}</p>
           <div className="grid gap-4 sm:grid-cols-3">
             {grupo.chaves.map((chave) => (
               <Campo
@@ -81,14 +81,14 @@ export default function ChapaParametrosForm({
       ))}
 
       <Cartao>
-        <p className="mb-1 text-sm font-semibold text-[#90A4AE]">Velocidade de corte a laser (m/min)</p>
-        <p className="mb-4 text-xs text-[#78909C]">Por material, espessura da chapa (mm) e potência do laser (kW). Também usada pelo oxicorte/plasma para aço carbono.</p>
+        <p className="mb-1 text-sm font-semibold text-steel">Velocidade de corte a laser (m/min)</p>
+        <p className="mb-4 text-xs text-muted">Por material, espessura da chapa (mm) e potência do laser (kW). Também usada pelo oxicorte/plasma para aço carbono.</p>
         {MATERIAIS_VELOCIDADE.map((mat) => (
           <div key={mat.valor} className="mb-4 last:mb-0">
-            <p className="mb-1 text-xs font-semibold text-[#78909C]">{mat.label}</p>
-            <div className="overflow-x-auto rounded-2xl border border-[#2a2a2a]">
+            <p className="mb-1 text-xs font-semibold text-muted">{mat.label}</p>
+            <div className="overflow-x-auto rounded-lg border border-panel-hover">
               <table className="w-full min-w-[420px] text-center text-xs">
-                <thead className="bg-[#181818] text-[#90A4AE]">
+                <thead className="bg-surface text-steel">
                   <tr>
                     <th className="px-3 py-2 text-left">Espessura</th>
                     {POTENCIAS.map((p) => (
@@ -98,8 +98,8 @@ export default function ChapaParametrosForm({
                 </thead>
                 <tbody>
                   {ESPESSURAS.map((esp) => (
-                    <tr key={esp} className="border-t border-[#2a2a2a]">
-                      <td className="px-3 py-2 text-left font-semibold text-[#90A4AE]">{esp}mm</td>
+                    <tr key={esp} className="border-t border-panel-hover">
+                      <td className="px-3 py-2 text-left font-semibold text-steel">{esp}mm</td>
                       {POTENCIAS.map((pot) => {
                         const chave = `laser|${mat.valor}|${esp}|${pot}`;
                         return (
@@ -108,7 +108,7 @@ export default function ChapaParametrosForm({
                               type="text"
                               value={velocidades[chave] ?? ""}
                               onChange={(e) => setVelocidade(chave, e.target.value)}
-                              className="h-8 w-16 rounded-lg border border-[#333333] bg-[#141414] px-1 text-center text-xs text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+                              className="h-8 w-16 rounded-lg border border-line bg-background px-1 text-center text-xs text-foreground outline-none focus:border-accent"
                             />
                           </td>
                         );

@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
@@ -425,88 +425,44 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#1e1e1e] text-white">
-      <div className="absolute inset-0">
+    <main className="auth-page">
+      <div className="auth-backdrop">
         <Image
           src="/images/login-eksteel.webp"
           alt="Gestão operacional Eksteel"
           fill
           priority
           unoptimized
-          className="object-cover object-center opacity-20"
+          className="object-cover object-center"
         />
-        <div className="absolute inset-0 bg-gradient-to-r from-[#1e1e1e]/95 via-[#1e1e1e]/85 to-[#1e1e1e]/20" />
+        <div className="auth-shade" />
       </div>
 
-      <section className="relative z-10 mx-auto flex min-h-screen max-w-6xl items-center px-4 py-8 sm:px-6 sm:py-12">
-        <div className="grid w-full gap-8 lg:grid-cols-[1fr_auto]">
-          <div className="flex w-full flex-col justify-center">
-            <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center">
-              <Image
-                src="/images/Eksteel-logo.png"
-                alt="Eksteel"
-                width={360}
-                height={108}
-                priority
-                unoptimized
-                className="h-20 sm:h-28 w-auto shrink-0 object-contain"
-                onError={() => {}}
-              />
-              <div className="hidden sm:block mx-6 h-20 w-px shrink-0 bg-gray-600" />
-              <span
-                className="text-base sm:text-lg uppercase leading-tight tracking-wider bg-gradient-to-r from-[#9e9e9e] to-[#f0f0f0] bg-clip-text text-transparent"
-                style={{ fontFamily: "var(--font-oswald)", fontWeight: 700 }}
-              >
-                Sistema de Gerenciamento Empresarial
-              </span>
-            </div>
-
-            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl md:text-5xl">
-              Controle vendas, estoque e lucro da sua empresa.
-            </h1>
-
-            <p className="mt-4 text-base leading-7 text-gray-400 md:text-lg">
-              Plataforma interna para acompanhar resultados nos marketplaces,
-              gerenciar estoque e analisar indicadores financeiros em tempo real.
-            </p>
-
-            <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {[
-                ["Marketplaces", "Mercado Livre, Shopee e outros canais."],
-                ["Estoque", "Inventário e alertas de reposição."],
-                ["Financeiro", "Lucro, margem e fluxo de caixa."],
-              ].map(([titulo, descricao]) => (
-                <div
-                  key={titulo}
-                  className="rounded-3xl border border-white/10 bg-white/8 p-4 shadow-sm backdrop-blur-md"
-                >
-                  <p className="text-sm font-semibold text-[#90A4AE]">{titulo}</p>
-                  <p className="mt-1.5 text-sm leading-6 text-gray-400">
-                    {descricao}
-                  </p>
-                </div>
-              ))}
-            </div>
+      <section className="auth-container">
+        <div className="auth-grid">
+          <div className="auth-brand">
+            <Image src="/images/Eksteel-logo.png" alt="EKsteel" width={360} height={108} priority className="h-12 w-auto object-contain" />
           </div>
-
-          <div className="w-full self-end rounded-[28px] border border-[#90A4AE] bg-white/90 p-6 shadow-xl shadow-black/5 backdrop-blur-md sm:w-[420px] text-[#1e1e1e]">
-            <div className="flex flex-wrap gap-3">
+          <div className="auth-card">
+            <p className="auth-eyebrow">EKsteel · Acesso ao sistema</p>
+            <h1 className="auth-title">{abaAtiva === "cadastro" ? "Crie sua conta" : abaAtiva === "recuperar" ? "Recupere seu acesso" : "Acesse sua conta"}</h1>
+            <div className="auth-switch mt-6">
               {[
                 ["login", "Entrar"],
                 ["cadastro", "Criar conta"],
-                ["recuperar", "Esqueci minha senha"],
               ].map(([aba, texto]) => (
                 <button
                   key={aba}
+                  aria-pressed={abaAtiva === aba}
                   type="button"
                   onClick={() => {
                     limparFeedback();
                     setAbaAtiva(aba as AbaAuth);
                   }}
-                  className={`rounded-2xl px-4 py-2 text-sm font-medium transition ${
+                  className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
                     abaAtiva === aba
-                      ? "bg-[#546E7A] text-white shadow-sm"
-                      : "bg-[#ECEFF1] text-[#546E7A] hover:bg-[#CFD8DC]"
+                      ? "bg-accent text-background shadow-sm"
+                      : "bg-surface text-steel hover:bg-panel-hover"
                   }`}
                 >
                   {texto}
@@ -515,13 +471,13 @@ export default function LoginPage() {
             </div>
 
             {mensagem ? (
-              <div className="mt-5 rounded-2xl border border-[#90A4AE] bg-[#ECEFF1] px-4 py-3 text-sm text-[#546E7A]">
+              <div role="status" className="mt-5 rounded-lg border border-line bg-surface px-4 py-3 text-sm text-muted">
                 {mensagem}
               </div>
             ) : null}
 
             {erro ? (
-              <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              <div role="alert" className="mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                 {erro}
               </div>
             ) : null}
@@ -545,22 +501,19 @@ export default function LoginPage() {
                   autoComplete="current-password"
                 />
 
-                <div className="rounded-2xl border border-[#90A4AE] bg-[#ECEFF1] px-4 py-3">
+                <div className="py-1">
                   <label className="flex cursor-pointer items-start gap-3 text-sm">
                     <input
                       type="checkbox"
                       checked={manterConectado}
                       onChange={(e) => setManterConectado(e.target.checked)}
-                      className="mt-0.5 h-4 w-4 rounded border-[#90A4AE] accent-[#546E7A]"
+                      className="mt-0.5 h-4 w-4 rounded border-line accent-accent"
                     />
                     <span>
                       <span className="block font-semibold">
                         Manter conectado
                       </span>
-                      <span className="mt-1 block text-xs leading-5 text-[#607D8B]">
-                        Mantém seu e-mail salvo neste navegador para facilitar o
-                        próximo acesso.
-                      </span>
+
                     </span>
                   </label>
                 </div>
@@ -624,6 +577,9 @@ export default function LoginPage() {
                 />
               </form>
             ) : null}
+            <button type="button" className="auth-recovery" onClick={() => { limparFeedback(); setAbaAtiva(abaAtiva === "recuperar" ? "login" : "recuperar"); }}>
+              {abaAtiva === "recuperar" ? "Voltar ao login" : "Esqueci minha senha"}
+            </button>
           </div>
         </div>
       </section>
@@ -688,19 +644,21 @@ function InputField({
   autoComplete,
   help,
 }: InputFieldProps) {
+  const fieldId = useId();
   const [mostrar, setMostrar] = useState(false);
   const ehSenha = tipoProp === "password";
   const tipo = ehSenha && mostrar ? "text" : tipoProp;
 
   return (
     <div>
-      <label className="mb-1 block text-sm font-medium">{label}</label>
+      <label htmlFor={fieldId} className="mb-1 block text-sm font-medium">{label}</label>
       <div className="relative">
         <input
+          id={fieldId}
           type={tipo}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full rounded-2xl border border-[#90A4AE] bg-white px-4 py-3 text-[#0d1b2a] outline-none transition placeholder:text-[#9E9E9E] focus:border-[#546E7A] focus:ring-2 focus:ring-[#ECEFF1]"
+          className="w-full rounded-lg border border-line bg-background px-4 py-3 text-foreground outline-none transition placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-foreground"
           style={ehSenha ? { paddingRight: "2.75rem" } : undefined}
           placeholder={placeholder}
           autoComplete={autoComplete}
@@ -708,20 +666,18 @@ function InputField({
         {ehSenha && (
           <button
             type="button"
-            tabIndex={-1}
             aria-label={mostrar ? "Ocultar senha" : "Mostrar senha"}
-            onMouseDown={(e) => {
-              e.preventDefault();
+            onClick={() => {
               setMostrar((v) => !v);
             }}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9E9E9E] hover:text-[#546E7A] transition"
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-muted transition"
           >
             {mostrar ? <EyeOffIcon /> : <EyeIcon />}
           </button>
         )}
       </div>
       {help ? (
-        <p className="mt-2 text-xs leading-5 text-[#607D8B]">{help}</p>
+        <p className="mt-2 text-xs leading-5 text-muted">{help}</p>
       ) : null}
     </div>
   );
@@ -738,7 +694,7 @@ function SubmitButton({
     <button
       type="submit"
       disabled={loading}
-      className="w-full rounded-2xl bg-[#546E7A] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#37474F] disabled:cursor-not-allowed disabled:opacity-60"
+      className="w-full rounded-lg bg-accent px-5 py-3 text-sm font-semibold text-background transition hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-60"
     >
       {loading ? "Processando..." : idleText}
     </button>

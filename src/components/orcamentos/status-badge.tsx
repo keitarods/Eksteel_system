@@ -1,7 +1,7 @@
 import type { StatusOrcamento } from "@/lib/orcamentos/types";
 
 const ESTILOS: Record<StatusOrcamento, string> = {
-  rascunho: "bg-[#333333]/40 text-[#90A4AE]",
+  rascunho: "bg-line/40 text-steel",
   enviado: "bg-blue-900/20 text-blue-400",
   aprovado: "bg-emerald-900/20 text-emerald-400",
   recusado: "bg-red-900/20 text-red-400",

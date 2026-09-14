@@ -19,8 +19,8 @@ import OrcamentoForm from "./orcamento-form";
 
 function LinhaDetalhe({ label, valor }: { label: string; valor: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between border-b border-[#2a2a2a] py-2.5 text-sm">
-      <span className="text-[#90A4AE]">{label}</span>
+    <div className="flex items-center justify-between border-b border-panel-hover py-2.5 text-sm">
+      <span className="text-steel">{label}</span>
       <span className="text-right font-semibold">{valor}</span>
     </div>
   );
@@ -90,7 +90,7 @@ export default function OrcamentoDetalhe({
   if (editando) {
     return (
       <Cartao>
-        <p className="text-sm font-semibold text-[#90A4AE]">Editando orçamento {orcamento.numero}</p>
+        <p className="text-sm font-semibold text-steel">Editando orçamento {orcamento.numero}</p>
         <div className="mt-4">
           <OrcamentoForm
             usuarioId={usuarioId}
@@ -115,7 +115,7 @@ export default function OrcamentoDetalhe({
       <Cartao>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold text-[#90A4AE]">Orçamento</p>
+            <p className="text-sm font-semibold text-steel">Orçamento</p>
             <h2 className="mt-0.5 text-2xl font-bold">{orcamento.numero}</h2>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -123,7 +123,7 @@ export default function OrcamentoDetalhe({
             <select
               value={orcamento.status}
               onChange={(e) => handleMudarStatus(e.target.value as StatusOrcamento)}
-              className="h-9 rounded-xl border border-[#333333] bg-[#141414] px-2 text-xs text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+              className="h-9 rounded-xl border border-line bg-background px-2 text-xs text-foreground outline-none focus:border-accent"
             >
               {STATUS_ORCAMENTO.map((s) => (
                 <option key={s.valor} value={s.valor}>{s.label}</option>
@@ -154,7 +154,7 @@ export default function OrcamentoDetalhe({
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Cartao>
-          <p className="mb-2 text-sm font-semibold text-[#90A4AE]">Cliente</p>
+          <p className="mb-2 text-sm font-semibold text-steel">Cliente</p>
           <LinhaDetalhe label="Nome" valor={cliente?.nome || "-"} />
           <LinhaDetalhe label="CNPJ/CPF" valor={cliente?.cnpjCpf || "-"} />
           <LinhaDetalhe label="Telefone" valor={cliente?.telefone || "-"} />
@@ -163,7 +163,7 @@ export default function OrcamentoDetalhe({
         </Cartao>
 
         <Cartao>
-          <p className="mb-2 text-sm font-semibold text-[#90A4AE]">Condições comerciais</p>
+          <p className="mb-2 text-sm font-semibold text-steel">Condições comerciais</p>
           <LinhaDetalhe label="Tipo" valor={<span className="capitalize">{orcamento.tipo.replace("_", " ")}</span>} />
           <LinhaDetalhe label="Emissão" valor={formatarData(orcamento.dataEmissao)} />
           <LinhaDetalhe label="Validade" valor={`${orcamento.validadeDias} dias`} />
@@ -178,10 +178,10 @@ export default function OrcamentoDetalhe({
       </div>
 
       <Cartao>
-        <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Itens</p>
-        <div className="overflow-x-auto rounded-2xl border border-[#2a2a2a]">
+        <p className="mb-3 text-sm font-semibold text-steel">Itens</p>
+        <div className="overflow-x-auto rounded-lg border border-panel-hover">
           <table className="w-full min-w-[600px] text-left text-sm">
-            <thead className="bg-[#181818] text-[#90A4AE]">
+            <thead className="bg-surface text-steel">
               <tr>
                 <Th>Descrição</Th>
                 <Th>Unid.</Th>
@@ -192,17 +192,17 @@ export default function OrcamentoDetalhe({
             </thead>
             <tbody>
               {itens.map((it) => (
-                <tr key={it.id} className="border-t border-[#2a2a2a]">
+                <tr key={it.id} className="border-t border-panel-hover">
                   <Td className="font-semibold">
                     {it.descricao}
                     {it.tipoItem === "servico" && it.detalhamentoTecnico && (
-                      <p className="mt-1 text-xs font-normal text-[#78909C]">{it.detalhamentoTecnico}</p>
+                      <p className="mt-1 text-xs font-normal text-muted">{it.detalhamentoTecnico}</p>
                     )}
                   </Td>
                   <Td>{it.unidade || "-"}</Td>
                   <Td>{it.quantidade}</Td>
                   <Td>{formatarMoeda(it.valorUnitario)}</Td>
-                  <Td className="font-semibold text-[#90A4AE]">{formatarMoeda(it.valorTotal)}</Td>
+                  <Td className="font-semibold text-steel">{formatarMoeda(it.valorTotal)}</Td>
                 </tr>
               ))}
             </tbody>
@@ -214,12 +214,12 @@ export default function OrcamentoDetalhe({
           <LinhaDetalhe label="Desconto" valor={`- ${formatarMoeda(orcamento.desconto)}`} />
           <div className="flex items-center justify-between pt-2 text-base font-bold">
             <span>Total</span>
-            <span className="text-[#90A4AE]">{formatarMoeda(orcamento.total)}</span>
+            <span className="text-steel">{formatarMoeda(orcamento.total)}</span>
           </div>
         </div>
 
         {orcamento.observacoes && (
-          <p className="mt-4 text-sm text-[#78909C]"><span className="font-semibold text-[#90A4AE]">Observações:</span> {orcamento.observacoes}</p>
+          <p className="mt-4 text-sm text-muted"><span className="font-semibold text-steel">Observações:</span> {orcamento.observacoes}</p>
         )}
       </Cartao>
     </div>

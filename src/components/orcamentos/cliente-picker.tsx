@@ -85,10 +85,10 @@ export default function ClientePicker({
       // Div, não <form> — o ClientePicker já fica dentro do <form> do orçamento,
       // e HTML não permite formulário aninhado (o navegador ignora o form interno
       // e o clique acaba submetendo o formulário de fora).
-      <div className="rounded-2xl border border-[#333333] bg-[#141414] p-4">
+      <div className="rounded-lg border border-line bg-background p-4">
         <div className="flex items-center justify-between">
-          <p className="text-sm font-semibold text-[#90A4AE]">Novo cliente</p>
-          <button type="button" onClick={() => setCriando(false)} className="text-[#90A4AE] hover:text-[#ECEFF1]">
+          <p className="text-sm font-semibold text-steel">Novo cliente</p>
+          <button type="button" onClick={() => setCriando(false)} className="text-steel hover:text-foreground">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -131,7 +131,7 @@ export default function ClientePicker({
             onClick={handleExcluir}
             disabled={excluindo}
             title="Excluir cliente selecionado"
-            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-red-900/50 bg-red-900/10 text-red-400 transition hover:bg-red-900/30 disabled:opacity-50"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-red-900/50 bg-red-900/10 text-red-400 transition hover:bg-red-900/30 disabled:opacity-50"
           >
             <Trash2 className="h-4 w-4" />
           </button>

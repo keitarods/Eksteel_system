@@ -9,9 +9,8 @@ node_modules/
 /build
 
 # env files — NEVER commit these
-.env
-.env.local
-.env.*.local
+.env*
+!.env*.example
 
 # build artifacts
 *.tsbuildinfo
@@ -24,3 +23,18 @@ yarn-error.log*
 
 # vercel
 .vercel
+
+# SQL gerado localmente, sem dumps no repositório
+/supabase/local/
+
+# Credenciais e exportações locais
+*.pem
+*.key
+*.p12
+*.pfx
+*.sql
+*.sql.gz
+*.sql.zip
+*.dump
+*.backup
+/tmp-*.pdf

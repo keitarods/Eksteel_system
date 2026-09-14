@@ -119,20 +119,20 @@ export default function ComposicaoCalculadora({
 
       {pecasIniciais.length > 0 && (
         <Cartao>
-          <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Peças já calculadas (histórico)</p>
+          <p className="mb-3 text-sm font-semibold text-steel">Peças já calculadas (histórico)</p>
           <div className="flex flex-col gap-2">
             {pecasIniciais.map((p) => (
-              <label key={p.id} className="flex items-center justify-between gap-3 rounded-xl border border-[#2a2a2a] bg-[#141414] px-3 py-2 text-sm">
+              <label key={p.id} className="flex items-center justify-between gap-3 rounded-xl border border-panel-hover bg-background px-3 py-2 text-sm">
                 <span className="flex items-center gap-2">
                   <input
                     type="checkbox"
                     checked={pecasSelecionadas.has(p.id)}
                     onChange={() => alternarPeca(p.id)}
-                    className="h-4 w-4 accent-[#546E7A]"
+                    className="h-4 w-4 accent-accent"
                   />
-                  {p.nome} <span className="text-xs text-[#78909C]">({resumoPeca(p)})</span>
+                  {p.nome} <span className="text-xs text-muted">({resumoPeca(p)})</span>
                 </span>
-                <span className="font-semibold text-[#90A4AE]">
+                <span className="font-semibold text-steel">
                   {(p.custoTotal * p.quantidade).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
                 </span>
               </label>
@@ -142,7 +142,7 @@ export default function ComposicaoCalculadora({
       )}
 
       <Cartao>
-        <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Mão de obra estimada</p>
+        <p className="mb-3 text-sm font-semibold text-steel">Mão de obra estimada</p>
         <div className="grid gap-3 sm:grid-cols-4">
           {PROCESSOS.map((proc) => (
             <Campo
@@ -157,15 +157,15 @@ export default function ComposicaoCalculadora({
 
       <Cartao>
         <div className="flex items-center justify-between">
-          <p className="text-sm font-semibold text-[#90A4AE]">Mão de obra extra</p>
-          <button type="button" onClick={() => setMaoDeObraExtra((prev) => [...prev, novaLinha()])} className="inline-flex h-8 items-center gap-1 rounded-xl border border-[#333333] bg-[#212121] px-2 text-xs font-semibold text-[#546E7A] hover:bg-[#2a2a2a]">
+          <p className="text-sm font-semibold text-steel">Mão de obra extra</p>
+          <button type="button" onClick={() => setMaoDeObraExtra((prev) => [...prev, novaLinha()])} className="inline-flex h-8 items-center gap-1 rounded-xl border border-line bg-panel px-2 text-xs font-semibold text-muted hover:bg-panel-hover">
             <Plus className="h-3.5 w-3.5" /> Adicionar
           </button>
         </div>
         {maoDeObraExtra.map((linha) => (
           <div key={linha.id} className="mt-2 flex gap-2">
-            <input type="text" value={linha.descricao} onChange={(e) => setMaoDeObraExtra((prev) => prev.map((l) => l.id === linha.id ? { ...l, descricao: e.target.value } : l))} placeholder="Descrição" className="h-9 flex-1 rounded-xl border border-[#333333] bg-[#141414] px-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]" />
-            <input type="text" value={linha.valor} onChange={(e) => setMaoDeObraExtra((prev) => prev.map((l) => l.id === linha.id ? { ...l, valor: e.target.value } : l))} placeholder="0,00" className="h-9 w-28 rounded-xl border border-[#333333] bg-[#141414] px-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]" />
+            <input type="text" value={linha.descricao} onChange={(e) => setMaoDeObraExtra((prev) => prev.map((l) => l.id === linha.id ? { ...l, descricao: e.target.value } : l))} placeholder="Descrição" className="h-9 flex-1 rounded-xl border border-line bg-background px-3 text-sm text-foreground outline-none focus:border-accent" />
+            <input type="text" value={linha.valor} onChange={(e) => setMaoDeObraExtra((prev) => prev.map((l) => l.id === linha.id ? { ...l, valor: e.target.value } : l))} placeholder="0,00" className="h-9 w-28 rounded-xl border border-line bg-background px-3 text-sm text-foreground outline-none focus:border-accent" />
             <button type="button" onClick={() => setMaoDeObraExtra((prev) => prev.filter((l) => l.id !== linha.id))} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-red-900/50 text-red-400 hover:bg-red-900/20"><Trash2 className="h-3.5 w-3.5" /></button>
           </div>
         ))}
@@ -173,26 +173,26 @@ export default function ComposicaoCalculadora({
 
       <Cartao>
         <div className="flex items-center justify-between">
-          <p className="text-sm font-semibold text-[#90A4AE]">Insumos (eletrodo, arame MIG, disco de corte...)</p>
-          <button type="button" onClick={() => setInsumos((prev) => [...prev, novaLinha()])} className="inline-flex h-8 items-center gap-1 rounded-xl border border-[#333333] bg-[#212121] px-2 text-xs font-semibold text-[#546E7A] hover:bg-[#2a2a2a]">
+          <p className="text-sm font-semibold text-steel">Insumos (eletrodo, arame MIG, disco de corte...)</p>
+          <button type="button" onClick={() => setInsumos((prev) => [...prev, novaLinha()])} className="inline-flex h-8 items-center gap-1 rounded-xl border border-line bg-panel px-2 text-xs font-semibold text-muted hover:bg-panel-hover">
             <Plus className="h-3.5 w-3.5" /> Adicionar
           </button>
         </div>
         {insumos.map((linha) => (
           <div key={linha.id} className="mt-2 flex gap-2">
-            <input type="text" value={linha.descricao} onChange={(e) => setInsumos((prev) => prev.map((l) => l.id === linha.id ? { ...l, descricao: e.target.value } : l))} placeholder="Descrição" className="h-9 flex-1 rounded-xl border border-[#333333] bg-[#141414] px-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]" />
-            <input type="text" value={linha.valor} onChange={(e) => setInsumos((prev) => prev.map((l) => l.id === linha.id ? { ...l, valor: e.target.value } : l))} placeholder="0,00" className="h-9 w-28 rounded-xl border border-[#333333] bg-[#141414] px-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]" />
+            <input type="text" value={linha.descricao} onChange={(e) => setInsumos((prev) => prev.map((l) => l.id === linha.id ? { ...l, descricao: e.target.value } : l))} placeholder="Descrição" className="h-9 flex-1 rounded-xl border border-line bg-background px-3 text-sm text-foreground outline-none focus:border-accent" />
+            <input type="text" value={linha.valor} onChange={(e) => setInsumos((prev) => prev.map((l) => l.id === linha.id ? { ...l, valor: e.target.value } : l))} placeholder="0,00" className="h-9 w-28 rounded-xl border border-line bg-background px-3 text-sm text-foreground outline-none focus:border-accent" />
             <button type="button" onClick={() => setInsumos((prev) => prev.filter((l) => l.id !== linha.id))} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-red-900/50 text-red-400 hover:bg-red-900/20"><Trash2 className="h-3.5 w-3.5" /></button>
           </div>
         ))}
       </Cartao>
 
       <Cartao>
-        <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Deslocamento e complexidade</p>
+        <p className="mb-3 text-sm font-semibold text-steel">Deslocamento e complexidade</p>
         <div className="grid gap-4 sm:grid-cols-2">
-          <div className="rounded-2xl border border-[#2a2a2a] bg-[#141414] p-3">
+          <div className="rounded-lg border border-panel-hover bg-background p-3">
             <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={usarDeslocamento} onChange={(e) => setUsarDeslocamento(e.target.checked)} className="h-4 w-4 accent-[#546E7A]" />
+              <input type="checkbox" checked={usarDeslocamento} onChange={(e) => setUsarDeslocamento(e.target.checked)} className="h-4 w-4 accent-accent" />
               Cobrar deslocamento/instalação (R$ {custoKm.toFixed(2)}/km)
             </label>
             {usarDeslocamento && (
@@ -202,9 +202,9 @@ export default function ComposicaoCalculadora({
               </div>
             )}
           </div>
-          <div className="rounded-2xl border border-[#2a2a2a] bg-[#141414] p-3">
+          <div className="rounded-lg border border-panel-hover bg-background p-3">
             <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={usarComplexidade} onChange={(e) => setUsarComplexidade(e.target.checked)} className="h-4 w-4 accent-[#546E7A]" />
+              <input type="checkbox" checked={usarComplexidade} onChange={(e) => setUsarComplexidade(e.target.checked)} className="h-4 w-4 accent-accent" />
               Aplicar fator de complexidade (peça sob medida, sem histórico)
             </label>
             {usarComplexidade && (
@@ -217,11 +217,11 @@ export default function ComposicaoCalculadora({
       </Cartao>
 
       <Cartao>
-        <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Perda de material e margem</p>
+        <p className="mb-3 text-sm font-semibold text-steel">Perda de material e margem</p>
         <div className="grid gap-4 sm:grid-cols-2">
-          <div className="rounded-2xl border border-[#2a2a2a] bg-[#141414] p-3">
+          <div className="rounded-lg border border-panel-hover bg-background p-3">
             <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={usarScrapCustom} onChange={(e) => setUsarScrapCustom(e.target.checked)} className="h-4 w-4 accent-[#546E7A]" />
+              <input type="checkbox" checked={usarScrapCustom} onChange={(e) => setUsarScrapCustom(e.target.checked)} className="h-4 w-4 accent-accent" />
               Usar scrap factor customizado (padrão: {parametros["scrap_factor"]?.valor ?? 0}%)
             </label>
             {usarScrapCustom && (
@@ -230,9 +230,9 @@ export default function ComposicaoCalculadora({
               </div>
             )}
           </div>
-          <div className="rounded-2xl border border-[#2a2a2a] bg-[#141414] p-3">
+          <div className="rounded-lg border border-panel-hover bg-background p-3">
             <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={usarMargemCustom} onChange={(e) => setUsarMargemCustom(e.target.checked)} className="h-4 w-4 accent-[#546E7A]" />
+              <input type="checkbox" checked={usarMargemCustom} onChange={(e) => setUsarMargemCustom(e.target.checked)} className="h-4 w-4 accent-accent" />
               Usar margem customizada (padrão: {parametros["margem_lucro_padrao"]?.valor ?? 0}%)
             </label>
             {usarMargemCustom && (
@@ -245,33 +245,33 @@ export default function ComposicaoCalculadora({
       </Cartao>
 
       <Cartao>
-        <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Breakdown do custo</p>
-        <div className="overflow-x-auto rounded-2xl border border-[#2a2a2a]">
+        <p className="mb-3 text-sm font-semibold text-steel">Breakdown do custo</p>
+        <div className="overflow-x-auto rounded-lg border border-panel-hover">
           <table className="w-full min-w-[420px] text-left text-sm">
-            <thead className="bg-[#181818] text-[#90A4AE]"><tr><Th>Item</Th><Th>Valor</Th></tr></thead>
+            <thead className="bg-surface text-steel"><tr><Th>Item</Th><Th>Valor</Th></tr></thead>
             <tbody>
               {resultado.itens.map((item, i) => (
-                <tr key={i} className="border-t border-[#2a2a2a]">
+                <tr key={i} className="border-t border-panel-hover">
                   <Td>{item.descricao}</Td>
                   <Td>{item.valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</Td>
                 </tr>
               ))}
               {resultado.itens.length === 0 && (
-                <tr><td colSpan={2} className="px-4 py-6 text-center text-sm text-[#78909C]">Nenhum item adicionado ainda.</td></tr>
+                <tr><td colSpan={2} className="px-4 py-6 text-center text-sm text-muted">Nenhum item adicionado ainda.</td></tr>
               )}
             </tbody>
           </table>
         </div>
 
         <div className="ml-auto mt-4 w-full max-w-xs space-y-1.5 text-sm">
-          <div className="flex justify-between"><span className="text-[#90A4AE]">Subtotal</span><span className="font-semibold">{resultado.subtotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span></div>
-          <div className="flex justify-between"><span className="text-[#90A4AE]">Perda de material ({scrapPercentual}%)</span><span className="font-semibold">{resultado.scrapValor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span></div>
-          <div className="flex justify-between"><span className="text-[#90A4AE]">Custo com perda</span><span className="font-semibold">{resultado.custoComScrap.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span></div>
-          <div className="flex justify-between"><span className="text-[#90A4AE]">Margem ({margemPercentual}%)</span><span className="font-semibold">{resultado.margemValor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span></div>
-          <div className="flex justify-between border-t border-[#2a2a2a] pt-2 text-base font-bold"><span>Preço sugerido</span><span className="text-[#90A4AE]">{resultado.precoSugerido.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span></div>
+          <div className="flex justify-between"><span className="text-steel">Subtotal</span><span className="font-semibold">{resultado.subtotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span></div>
+          <div className="flex justify-between"><span className="text-steel">Perda de material ({scrapPercentual}%)</span><span className="font-semibold">{resultado.scrapValor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span></div>
+          <div className="flex justify-between"><span className="text-steel">Custo com perda</span><span className="font-semibold">{resultado.custoComScrap.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span></div>
+          <div className="flex justify-between"><span className="text-steel">Margem ({margemPercentual}%)</span><span className="font-semibold">{resultado.margemValor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span></div>
+          <div className="flex justify-between border-t border-panel-hover pt-2 text-base font-bold"><span>Preço sugerido</span><span className="text-steel">{resultado.precoSugerido.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span></div>
         </div>
 
-        <div className="mt-5 flex flex-col gap-3 border-t border-[#2a2a2a] pt-5 sm:flex-row sm:items-end">
+        <div className="mt-5 flex flex-col gap-3 border-t border-panel-hover pt-5 sm:flex-row sm:items-end">
           <div className="flex-1">
             <Campo label="Descrição do item pro orçamento" value={descricaoItem} onChange={setDescricaoItem} />
           </div>

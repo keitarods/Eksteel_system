@@ -51,7 +51,7 @@ export default function SoldagemParametrosForm({
 
       {GRUPOS.map((grupo) => (
         <Cartao key={grupo.titulo}>
-          <p className="mb-3 text-sm font-semibold text-[#90A4AE]">{grupo.titulo}</p>
+          <p className="mb-3 text-sm font-semibold text-steel">{grupo.titulo}</p>
           <div className="grid gap-4 sm:grid-cols-3">
             {grupo.chaves.map((chave) => (
               <Campo
@@ -66,11 +66,11 @@ export default function SoldagemParametrosForm({
       ))}
 
       <Cartao>
-        <p className="mb-1 text-sm font-semibold text-[#90A4AE]">Tempo padrão de solda (min por metro de cordão)</p>
-        <p className="mb-4 text-xs text-[#78909C]">Por tipo de junta e espessura — base do cálculo (MIG, posição plana).</p>
-        <div className="overflow-x-auto rounded-2xl border border-[#2a2a2a]">
+        <p className="mb-1 text-sm font-semibold text-steel">Tempo padrão de solda (min por metro de cordão)</p>
+        <p className="mb-4 text-xs text-muted">Por tipo de junta e espessura — base do cálculo (MIG, posição plana).</p>
+        <div className="overflow-x-auto rounded-lg border border-panel-hover">
           <table className="w-full min-w-[380px] text-center text-xs">
-            <thead className="bg-[#181818] text-[#90A4AE]">
+            <thead className="bg-surface text-steel">
               <tr>
                 <th className="px-3 py-2 text-left">Junta \ Espessura</th>
                 {ESPESSURAS_SOLDA.map((esp) => <th key={esp} className="px-3 py-2">{esp}mm</th>)}
@@ -78,8 +78,8 @@ export default function SoldagemParametrosForm({
             </thead>
             <tbody>
               {TIPOS_JUNTA_SOLDA.map((junta) => (
-                <tr key={junta.valor} className="border-t border-[#2a2a2a]">
-                  <td className="px-3 py-2 text-left font-semibold text-[#90A4AE]">{junta.label}</td>
+                <tr key={junta.valor} className="border-t border-panel-hover">
+                  <td className="px-3 py-2 text-left font-semibold text-steel">{junta.label}</td>
                   {ESPESSURAS_SOLDA.map((esp) => {
                     const chave = `${junta.valor}|${esp}`;
                     return (
@@ -88,7 +88,7 @@ export default function SoldagemParametrosForm({
                           type="text"
                           value={tempos[chave] ?? ""}
                           onChange={(e) => setTempo(chave, e.target.value)}
-                          className="h-8 w-16 rounded-lg border border-[#333333] bg-[#141414] px-1 text-center text-xs text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+                          className="h-8 w-16 rounded-lg border border-line bg-background px-1 text-center text-xs text-foreground outline-none focus:border-accent"
                         />
                       </td>
                     );

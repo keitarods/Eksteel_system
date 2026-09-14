@@ -124,7 +124,7 @@ export default function CadCaeParametrosForm({
 
       {GRUPOS.map((grupo) => (
         <Cartao key={grupo.titulo}>
-          <p className="mb-3 text-sm font-semibold text-[#90A4AE]">{grupo.titulo}</p>
+          <p className="mb-3 text-sm font-semibold text-steel">{grupo.titulo}</p>
           <div className="grid gap-4 sm:grid-cols-3">
             {grupo.chaves.map((chave) => (
               <Campo
@@ -138,9 +138,9 @@ export default function CadCaeParametrosForm({
         </Cartao>
       ))}
 
-      <div className="rounded-2xl border border-[#2a2a2a] bg-[#141414] p-3 text-sm">
-        Hora técnica base resultante: <span className="font-semibold text-[#90A4AE]">{horaTecnicaBase.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/h</span>
-        <span className="ml-2 text-xs text-[#78909C]">(calculada — salário × Fator K ÷ horas produtivas; confira se está coerente antes de aplicar aos níveis abaixo)</span>
+      <div className="rounded-lg border border-panel-hover bg-background p-3 text-sm">
+        Hora técnica base resultante: <span className="font-semibold text-steel">{horaTecnicaBase.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/h</span>
+        <span className="ml-2 text-xs text-muted">(calculada — salário × Fator K ÷ horas produtivas; confira se está coerente antes de aplicar aos níveis abaixo)</span>
       </div>
 
       <div>
@@ -151,15 +151,15 @@ export default function CadCaeParametrosForm({
       </div>
 
       <Cartao>
-        <p className="mb-1 text-sm font-semibold text-[#90A4AE]">Níveis de responsabilidade</p>
-        <p className="mb-4 text-xs text-[#78909C]">
+        <p className="mb-1 text-sm font-semibold text-steel">Níveis de responsabilidade</p>
+        <p className="mb-4 text-xs text-muted">
           Custo/hora de cada nível = hora técnica base × multiplicador. Adicione, edite ou desative níveis
           conforme o tipo de cliente/projeto que for aparecendo — sem precisar mexer em código.
         </p>
 
         <div className="flex flex-col gap-4">
           {niveis.map((nivel) => (
-            <div key={nivel.id} className={`rounded-2xl border p-4 ${nivel.ativo ? "border-[#2a2a2a] bg-[#141414]" : "border-[#2a2a2a] bg-[#141414] opacity-50"}`}>
+            <div key={nivel.id} className={`rounded-lg border p-4 ${nivel.ativo ? "border-panel-hover bg-background" : "border-panel-hover bg-background opacity-50"}`}>
               <div className="grid gap-3 sm:grid-cols-3">
                 <Campo label="Nome" value={nivel.nome} onChange={(v) => atualizarNivelLocal(nivel.id, "nome", v)} />
                 <Campo
@@ -169,7 +169,7 @@ export default function CadCaeParametrosForm({
                 />
                 <div>
                   <p className="mb-1 text-sm font-medium">Custo/hora resultante</p>
-                  <p className="flex h-11 items-center rounded-2xl border border-[#333333] bg-[#181818] px-4 text-sm font-semibold text-[#90A4AE]">
+                  <p className="flex h-11 items-center rounded-lg border border-line bg-surface px-4 text-sm font-semibold text-steel">
                     {(horaTecnicaBase * parseNumero(nivel.multiplicadorHora)).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/h
                   </p>
                 </div>
@@ -188,7 +188,7 @@ export default function CadCaeParametrosForm({
                     type="checkbox"
                     checked={nivel.exigeArt}
                     onChange={(e) => atualizarNivelLocal(nivel.id, "exigeArt", e.target.checked)}
-                    className="h-4 w-4 accent-[#546E7A]"
+                    className="h-4 w-4 accent-accent"
                   />
                   Exige ART/RRT
                 </label>
@@ -197,14 +197,14 @@ export default function CadCaeParametrosForm({
                     type="checkbox"
                     checked={nivel.ativo}
                     onChange={() => alternarAtivo(nivel)}
-                    className="h-4 w-4 accent-[#546E7A]"
+                    className="h-4 w-4 accent-accent"
                   />
                   Ativo (aparece na calculadora)
                 </label>
                 <button
                   type="button"
                   onClick={() => salvarNivel(nivel)}
-                  className="ml-auto inline-flex h-9 items-center gap-1 rounded-xl border border-[#333333] bg-[#212121] px-3 text-xs font-semibold text-[#546E7A] transition hover:bg-[#2a2a2a]"
+                  className="ml-auto inline-flex h-9 items-center gap-1 rounded-xl border border-line bg-panel px-3 text-xs font-semibold text-muted transition hover:bg-panel-hover"
                 >
                   <Save className="h-3.5 w-3.5" /> Salvar nível
                 </button>
@@ -213,13 +213,13 @@ export default function CadCaeParametrosForm({
           ))}
         </div>
 
-        <div className="mt-5 rounded-2xl border border-dashed border-[#333333] p-4">
-          <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Novo nível</p>
+        <div className="mt-5 rounded-lg border border-dashed border-line p-4">
+          <p className="mb-3 text-sm font-semibold text-steel">Novo nível</p>
           <div className="grid gap-3 sm:grid-cols-3">
             <Campo label="Nome" value={novoNome} onChange={setNovoNome} placeholder="Ex: Cálculo/CAE — Pleno" />
             <Campo label="Multiplicador sobre a hora base" value={novoMultiplicador} onChange={setNovoMultiplicador} />
             <label className="flex items-center gap-2 self-end pb-3 text-sm">
-              <input type="checkbox" checked={novoExigeArt} onChange={(e) => setNovoExigeArt(e.target.checked)} className="h-4 w-4 accent-[#546E7A]" />
+              <input type="checkbox" checked={novoExigeArt} onChange={(e) => setNovoExigeArt(e.target.checked)} className="h-4 w-4 accent-accent" />
               Exige ART/RRT
             </label>
           </div>

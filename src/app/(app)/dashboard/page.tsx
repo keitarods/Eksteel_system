@@ -7,7 +7,7 @@ import LogoutButton from "@/components/auth/logout-button";
 import DashboardTabs from "@/components/dashboard/dashboard-tabs";
 
 function hojeIso() {
-  return new Date().toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
 }
 
 const ABAS_VALIDAS = [
@@ -16,6 +16,7 @@ const ABAS_VALIDAS = [
   "cadastro",
   "estoque",
   "compras",
+  "relatorios",
   "balancete",
   "usuarios",
 ] as const;
@@ -60,13 +61,13 @@ export default async function DashboardPage({
   const isAdmin = vinculo?.papel === "admin" || vinculo?.papel === "socio";
 
   return (
-    <main className="min-h-screen bg-[#1e1e1e] px-3 py-5 sm:px-6 sm:py-8 text-[#ECEFF1]">
+    <main className="min-h-screen bg-background px-3 py-5 sm:px-6 sm:py-8 text-foreground">
       <section className="mx-auto max-w-7xl">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div className="flex flex-col gap-2">
             <Link
               href="/app"
-              className="mb-2 inline-flex items-center gap-2 text-sm font-semibold text-[#90A4AE] transition hover:text-[#ECEFF1]"
+              className="mb-2 inline-flex items-center gap-2 text-sm font-semibold text-steel transition hover:text-foreground"
             >
               <ArrowLeft className="h-4 w-4" />
               Voltar ao início
@@ -81,7 +82,7 @@ export default async function DashboardPage({
                 unoptimized
                 className="h-11 w-auto object-contain"
               />
-              <div className="h-8 w-px bg-[#90A4AE]" />
+              <div className="h-8 w-px bg-steel" />
               <Image
                 src="/images/dashboard.png"
                 alt="Dashboard"
@@ -94,19 +95,19 @@ export default async function DashboardPage({
             <h1 className="text-2xl font-bold tracking-tight sm:text-3xl md:text-4xl">
               Olá, {nomeUsuario}
             </h1>
-            <p className="max-w-2xl text-sm leading-6 text-[#78909C] md:text-base">
+            <p className="max-w-2xl text-sm leading-6 text-muted md:text-base">
               Centralize vendas, produtos, estoque, compras e indicadores
               financeiros em um só lugar.
             </p>
           </div>
 
-          <div className="flex self-start items-center gap-3 rounded-3xl border border-white/10 bg-white/5 backdrop-blur-sm p-3 shadow-sm sm:shrink-0">
+          <div className="flex self-start items-center gap-3 rounded-xl border border-white/10 bg-white/5 backdrop-blur-sm p-3 shadow-sm sm:shrink-0">
             <div className="flex flex-col md:items-end">
-              <span className="max-w-[220px] truncate text-sm font-semibold text-[#90A4AE]">
+              <span className="max-w-[220px] truncate text-sm font-semibold text-steel">
                 {nomeUsuario}
               </span>
               {user.email ? (
-                <span className="max-w-[220px] truncate text-xs text-[#78909C]">
+                <span className="max-w-[220px] truncate text-xs text-muted">
                   {user.email}
                 </span>
               ) : null}

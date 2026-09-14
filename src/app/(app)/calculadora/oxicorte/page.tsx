@@ -29,15 +29,15 @@ export default async function OxicortePage() {
   const velocidades = velocidadesTodas.filter((v) => v.processo === "oxicorte" || v.processo === "plasma");
 
   return (
-    <main className="min-h-screen bg-[#1e1e1e] px-3 py-5 text-[#ECEFF1] sm:px-6 sm:py-8">
+    <main className="min-h-screen bg-background px-3 py-5 text-foreground sm:px-6 sm:py-8">
       <section className="mx-auto max-w-5xl">
-        <Link href="/calculadora" className="mb-2 inline-flex items-center gap-2 text-sm font-semibold text-[#90A4AE] transition hover:text-[#ECEFF1]">
+        <Link href="/calculadora" className="mb-2 inline-flex items-center gap-2 text-sm font-semibold text-steel transition hover:text-foreground">
           <ArrowLeft className="h-4 w-4" />
           Voltar à calculadora
         </Link>
-        <p className="text-sm font-semibold text-[#90A4AE]">Calculadora</p>
+        <p className="text-sm font-semibold text-steel">Calculadora</p>
         <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Oxicorte e plasma</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-[#78909C]">
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
           Chapa grossa cortada por oxicorte (só aço carbono) ou plasma. Use um DXF pra pegar o perímetro
           automaticamente, ou informe área/perímetro na mão — comum não ter desenho CAD nesse tipo de corte.
         </p>

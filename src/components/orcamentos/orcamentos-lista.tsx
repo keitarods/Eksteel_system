@@ -36,44 +36,44 @@ export default function OrcamentosLista({
       <div className="flex flex-wrap items-end gap-3">
         <div className="relative min-w-56 flex-1">
           <label className="mb-1 block text-sm font-medium">Buscar</label>
-          <Search className="pointer-events-none absolute left-4 top-[42px] h-4 w-4 -translate-y-1/2 text-[#90A4AE]" />
+          <Search className="pointer-events-none absolute left-4 top-[42px] h-4 w-4 -translate-y-1/2 text-steel" />
           <input
             type="search"
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
             placeholder="Número ou cliente"
-            className="h-11 w-full rounded-2xl border border-[#333333] bg-[#141414] pl-11 pr-4 text-sm text-[#ECEFF1] outline-none placeholder:text-[#546E7A] focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+            className="h-11 w-full rounded-lg border border-line bg-background pl-11 pr-4 text-sm text-foreground outline-none placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent-dark"
           />
         </div>
         <div>
           <label className="mb-1 block text-sm font-medium">Status</label>
-          <select value={status} onChange={(e) => setStatus(e.target.value)} className="h-11 rounded-2xl border border-[#333333] bg-[#141414] px-4 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]">
+          <select value={status} onChange={(e) => setStatus(e.target.value)} className="h-11 rounded-lg border border-line bg-background px-4 text-sm text-foreground outline-none focus:border-accent">
             <option value="">Todos</option>
             {STATUS_ORCAMENTO.map((s) => <option key={s.valor} value={s.valor}>{s.label}</option>)}
           </select>
         </div>
         <div>
           <label className="mb-1 block text-sm font-medium">Cliente</label>
-          <select value={clienteId} onChange={(e) => setClienteId(e.target.value)} className="h-11 rounded-2xl border border-[#333333] bg-[#141414] px-4 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]">
+          <select value={clienteId} onChange={(e) => setClienteId(e.target.value)} className="h-11 rounded-lg border border-line bg-background px-4 text-sm text-foreground outline-none focus:border-accent">
             <option value="">Todos</option>
             {clientes.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
           </select>
         </div>
         <div>
           <label className="mb-1 block text-sm font-medium">De</label>
-          <input type="date" value={de} onChange={(e) => setDe(e.target.value)} className="h-11 rounded-2xl border border-[#333333] bg-[#141414] px-4 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]" />
+          <input type="date" value={de} onChange={(e) => setDe(e.target.value)} className="h-11 rounded-lg border border-line bg-background px-4 text-sm text-foreground outline-none focus:border-accent" />
         </div>
         <div>
           <label className="mb-1 block text-sm font-medium">Até</label>
-          <input type="date" value={ate} onChange={(e) => setAte(e.target.value)} className="h-11 rounded-2xl border border-[#333333] bg-[#141414] px-4 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]" />
+          <input type="date" value={ate} onChange={(e) => setAte(e.target.value)} className="h-11 rounded-lg border border-line bg-background px-4 text-sm text-foreground outline-none focus:border-accent" />
         </div>
       </div>
 
-      <div className="mt-5 overflow-hidden rounded-3xl border border-[#333333]">
+      <div className="mt-5 overflow-hidden rounded-xl border border-line">
         {filtrados.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] bg-[#212121] text-left text-sm">
-              <thead className="bg-[#181818] text-[#90A4AE]">
+            <table className="w-full min-w-[720px] bg-panel text-left text-sm">
+              <thead className="bg-surface text-steel">
                 <tr>
                   <Th>Número</Th>
                   <Th>Cliente</Th>
@@ -85,14 +85,14 @@ export default function OrcamentosLista({
               </thead>
               <tbody>
                 {filtrados.map((o) => (
-                  <tr key={o.id} className="border-t border-[#2a2a2a] transition hover:bg-[#2a2a2a]">
+                  <tr key={o.id} className="border-t border-panel-hover transition hover:bg-panel-hover">
                     <Td className="font-semibold">
                       <Link href={`/orcamentos/${o.id}`} className="hover:underline">{o.numero}</Link>
                     </Td>
                     <Td>{o.clienteNome || "-"}</Td>
-                    <Td className="text-xs text-[#78909C] capitalize">{o.tipo.replace("_", " ")}</Td>
+                    <Td className="text-xs text-muted capitalize">{o.tipo.replace("_", " ")}</Td>
                     <Td>{formatarData(o.dataEmissao)}</Td>
-                    <Td className="font-semibold text-[#90A4AE]">{formatarMoeda(o.total)}</Td>
+                    <Td className="font-semibold text-steel">{formatarMoeda(o.total)}</Td>
                     <Td><StatusBadge status={o.status} /></Td>
                   </tr>
                 ))}
@@ -100,7 +100,7 @@ export default function OrcamentosLista({
             </table>
           </div>
         ) : (
-          <div className="px-4 py-12 text-center text-sm text-[#78909C]">Nenhum orçamento encontrado.</div>
+          <div className="px-4 py-12 text-center text-sm text-muted">Nenhum orçamento encontrado.</div>
         )}
       </div>
     </div>

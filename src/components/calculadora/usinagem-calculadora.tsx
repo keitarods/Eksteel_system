@@ -171,14 +171,14 @@ export default function UsinagemCalculadora({
 
         <div className="mt-4">
           <p className="mb-2 text-sm font-medium">Tempo de usinagem</p>
-          <div className="mb-3 flex gap-2 rounded-2xl border border-[#333333] bg-[#181818] p-1.5 self-start">
+          <div className="mb-3 flex gap-2 rounded-lg border border-line bg-surface p-1.5 self-start">
             {(["manual", "estimado"] as const).map((m) => (
               <button
                 key={m}
                 type="button"
                 onClick={() => setModoTempo(m)}
                 className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
-                  modoTempo === m ? "bg-[#546E7A] text-white" : "text-[#90A4AE] hover:bg-[#2a2a2a]"
+                  modoTempo === m ? "bg-accent text-background" : "text-steel hover:bg-panel-hover"
                 }`}
               >
                 {m === "manual" ? "Informar tempo" : "Estimar por complexidade"}
@@ -197,21 +197,21 @@ export default function UsinagemCalculadora({
                 onChange={(v) => setComplexidade(v as Complexidade)}
                 options={COMPLEXIDADES.map((c) => ({ valor: c.valor, label: c.label }))}
               />
-              <p className="mt-1 text-xs text-[#78909C]">Tempo estimado: {tempoUsinagemMin.toFixed(1)}min (baseado em {tempoBaseMin}min × multiplicador de complexidade)</p>
+              <p className="mt-1 text-xs text-muted">Tempo estimado: {tempoUsinagemMin.toFixed(1)}min (baseado em {tempoBaseMin}min × multiplicador de complexidade)</p>
             </div>
           )}
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-3 rounded-2xl border border-[#2a2a2a] bg-[#141414] p-3 text-sm sm:grid-cols-4">
-          <div><p className="text-xs text-[#78909C]">Material</p><p className="font-semibold">{previa.custoMaterial.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
-          <div><p className="text-xs text-[#78909C]">Operação</p><p className="font-semibold">{previa.custoOperacao.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
-          <div><p className="text-xs text-[#78909C]">Setup rateado</p><p className="font-semibold">{previa.custoSetupRateado.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
-          <div><p className="text-xs text-[#78909C]">Ferramental</p><p className="font-semibold">{previa.custoFerramental.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
+        <div className="mt-4 grid grid-cols-2 gap-3 rounded-lg border border-panel-hover bg-background p-3 text-sm sm:grid-cols-4">
+          <div><p className="text-xs text-muted">Material</p><p className="font-semibold">{previa.custoMaterial.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
+          <div><p className="text-xs text-muted">Operação</p><p className="font-semibold">{previa.custoOperacao.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
+          <div><p className="text-xs text-muted">Setup rateado</p><p className="font-semibold">{previa.custoSetupRateado.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
+          <div><p className="text-xs text-muted">Ferramental</p><p className="font-semibold">{previa.custoFerramental.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
         </div>
 
         <p className="mt-3 text-sm">
-          Custo por peça: <span className="font-semibold text-[#90A4AE]">{previa.custoUnitario.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
-          {" · "}Total do lote desta peça: <span className="font-semibold text-[#90A4AE]">{previa.custoTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
+          Custo por peça: <span className="font-semibold text-steel">{previa.custoUnitario.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
+          {" · "}Total do lote desta peça: <span className="font-semibold text-steel">{previa.custoTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
         </p>
 
         <div className="mt-4">
@@ -221,10 +221,10 @@ export default function UsinagemCalculadora({
 
       {lote.length > 0 && (
         <Cartao>
-          <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Lote ({lote.length} peça{lote.length === 1 ? "" : "s"})</p>
-          <div className="overflow-x-auto rounded-2xl border border-[#2a2a2a]">
+          <p className="mb-3 text-sm font-semibold text-steel">Lote ({lote.length} peça{lote.length === 1 ? "" : "s"})</p>
+          <div className="overflow-x-auto rounded-lg border border-panel-hover">
             <table className="w-full min-w-[760px] text-left text-sm">
-              <thead className="bg-[#181818] text-[#90A4AE]">
+              <thead className="bg-surface text-steel">
                 <tr>
                   <Th>Peça</Th>
                   <Th>Equipamento</Th>
@@ -236,19 +236,19 @@ export default function UsinagemCalculadora({
               </thead>
               <tbody>
                 {lote.map((p) => (
-                  <tr key={p.id} className="border-t border-[#2a2a2a] align-top">
+                  <tr key={p.id} className="border-t border-panel-hover align-top">
                     <Td className="font-semibold">{p.nome}</Td>
-                    <Td className="text-xs text-[#78909C]">{EQUIPAMENTOS_USINAGEM.find((e) => e.valor === p.equipamento)?.label}</Td>
+                    <Td className="text-xs text-muted">{EQUIPAMENTOS_USINAGEM.find((e) => e.valor === p.equipamento)?.label}</Td>
                     <Td>{p.quantidade}</Td>
                     <Td>{p.custoUnitario.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</Td>
-                    <Td className="font-semibold text-[#90A4AE]">{p.custoTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</Td>
+                    <Td className="font-semibold text-steel">{p.custoTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</Td>
                     <Td>
                       <div className="flex flex-col gap-2">
                         <button
                           type="button"
                           onClick={() => salvarNoHistorico(p)}
                           disabled={salvandoId === p.id}
-                          className="inline-flex h-8 items-center gap-1 rounded-xl border border-[#333333] bg-[#212121] px-2 text-xs font-semibold text-[#546E7A] transition hover:bg-[#2a2a2a]"
+                          className="inline-flex h-8 items-center gap-1 rounded-xl border border-line bg-panel px-2 text-xs font-semibold text-muted transition hover:bg-panel-hover"
                         >
                           <Save className="h-3.5 w-3.5" /> Salvar
                         </button>
@@ -275,7 +275,7 @@ export default function UsinagemCalculadora({
             </table>
           </div>
           <p className="mt-4 text-right text-base font-bold">
-            Total do lote: <span className="text-[#90A4AE]">{totalLote.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
+            Total do lote: <span className="text-steel">{totalLote.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
           </p>
         </Cartao>
       )}

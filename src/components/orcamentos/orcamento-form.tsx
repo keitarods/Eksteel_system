@@ -225,30 +225,30 @@ export default function OrcamentoForm({
       </div>
 
       <div>
-        <p className="mb-2 text-sm font-semibold text-[#90A4AE]">Itens do orçamento</p>
+        <p className="mb-2 text-sm font-semibold text-steel">Itens do orçamento</p>
         <OrcamentoItensEditor itens={itens} onChange={setItens} />
       </div>
 
-      <div className="ml-auto w-full max-w-xs space-y-2 rounded-2xl border border-[#333333] bg-[#141414] p-4">
-        <div className="flex items-center justify-between text-sm text-[#90A4AE]">
+      <div className="ml-auto w-full max-w-xs space-y-2 rounded-lg border border-line bg-background p-4">
+        <div className="flex items-center justify-between text-sm text-steel">
           <span>Subtotal</span>
-          <span className="font-semibold text-[#ECEFF1]">
+          <span className="font-semibold text-foreground">
             {subtotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
           </span>
         </div>
-        <div className="flex items-center justify-between gap-3 text-sm text-[#90A4AE]">
+        <div className="flex items-center justify-between gap-3 text-sm text-steel">
           <span>Desconto (R$)</span>
           <input
             type="text"
             value={desconto}
             onChange={(e) => setDesconto(e.target.value)}
             placeholder="0,00"
-            className="h-9 w-28 rounded-xl border border-[#333333] bg-[#212121] px-2 text-right text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+            className="h-9 w-28 rounded-xl border border-line bg-panel px-2 text-right text-sm text-foreground outline-none focus:border-accent"
           />
         </div>
-        <div className="flex items-center justify-between border-t border-[#2a2a2a] pt-2 text-base font-bold">
+        <div className="flex items-center justify-between border-t border-panel-hover pt-2 text-base font-bold">
           <span>Total</span>
-          <span className="text-[#90A4AE]">
+          <span className="text-steel">
             {total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
           </span>
         </div>

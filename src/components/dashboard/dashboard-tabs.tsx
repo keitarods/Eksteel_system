@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Archive,
   BarChart3,
@@ -38,6 +38,11 @@ import {
   YAxis,
 } from "recharts";
 import { createClient } from "@/lib/supabase/client";
+import ProdutoSiteEditor from "@/components/dashboard/produto-site-editor";
+import RoscaProdutos from "@/components/dashboard/rosca-produtos";
+import RelatoriosModulo from "@/components/dashboard/relatorios-modulo";
+import { buscarTodasLinhas, buscarKitsComItens } from "@/lib/relatorios/dados";
+import { prepararVendas, resumoPeriodo, posicaoEstoque, agruparValores, fimMes, rankingItens } from "@/lib/relatorios/metricas";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -47,6 +52,7 @@ type AbaDashboard =
   | "cadastro"
   | "estoque"
   | "compras"
+  | "relatorios"
   | "balancete"
   | "usuarios";
 
@@ -126,6 +132,9 @@ async function lancarCompraNoBalancete({
 type Marketplace = "Mercado Livre" | "Shopee" | "Site Próprio" | "Outro";
 
 type Produto = {
+  custoMedio?: number | null;
+  custoMedioEstimado?: boolean;
+  publicarSite: boolean;
   id: string;
   codigo: string;
   nome: string;
@@ -138,6 +147,10 @@ type Produto = {
 };
 
 type Venda = {
+  cmvTotal?: number | null;
+  cmvEstimado?: boolean;
+  cmvComponentes?: { produto_id: string; quantidade: number; custo_unitario: number | null }[] | null;
+  cmvRegistradoEm?: string;
   id: string;
   data: string;
   marketplace: Marketplace;
@@ -234,6 +247,7 @@ type ItemFabricacaoRascunho = {
 };
 
 type PedidoFabricacao = {
+  integradoCmv?: boolean;
   id: string;
   produtoId: string;
   produtoNome: string;
@@ -325,11 +339,7 @@ const CORES = [
   "#558B2F", // verde oliva
 ];
 
-// Paleta para gráficos de receita — sem vermelho (vermelho remete a despesa)
-const CORES_RECEITA = [
-  "#1976D2", "#F9A825", "#6A1B9A", "#00838F", "#558B2F",
-  "#0277BD", "#F57F17", "#4527A0", "#00695C", "#33691E",
-];
+
 
 // Paleta para gráficos de despesa — tons de vermelho e laranja
 const CORES_DESPESA = [
@@ -343,6 +353,7 @@ const TODAS_ABAS = [
   { id: "cadastro", label: "Cadastro", icon: ClipboardList },
   { id: "estoque", label: "Estoque", icon: Archive },
   { id: "compras", label: "Compras", icon: PackagePlus },
+  { id: "relatorios", label: "Relatórios", icon: BarChart3 },
   { id: "balancete", label: "Balancete", icon: Scale },
   { id: "usuarios", label: "Usuários", icon: Users },
 ] satisfies Array<{
@@ -365,7 +376,8 @@ function proximoCodigo(lista: { codigo: string }[], prefixo: string): string {
   return `${prefixo}${String(n).padStart(3, "0")}`;
 }
 
-function formatarMoeda(valor: number) {
+function formatarMoeda(valor: number | null) {
+  if (valor === null) return "Não apurado";
   return valor.toLocaleString("pt-BR", {
     style: "currency",
     currency: "BRL",
@@ -404,7 +416,7 @@ function totalBrutoVenda(v: Venda) {
   return v.valorUnitario * v.quantidade;
 }
 
-// Valor líquido: bruto menos desconto concedido e taxa cobrada pelo marketplace — o que realmente entra no caixa.
+// Valor após desconto e comissão. A venda não comprova recebimento em caixa.
 function totalLiquidoVenda(v: Venda) {
   return v.valorUnitario * v.quantidade - v.desconto - v.taxaMarketplace;
 }
@@ -432,29 +444,6 @@ function precoSugeridoKit(kit: Kit, produtos: Produto[]) {
   }, 0);
 }
 
-// Aplica no estoque a diferença entre o consumo antigo (revertido) e o novo (aplicado) — usado
-// tanto pra criar/excluir venda (um dos dois lados vazio) quanto pra editar (os dois preenchidos).
-async function aplicarDeltaEstoque(
-  supabase: ReturnType<typeof createClient>,
-  produtos: Produto[],
-  consumoAntigo: ConsumoEstoque[],
-  consumoNovo: ConsumoEstoque[]
-) {
-  const delta: Record<string, number> = {};
-  for (const item of consumoAntigo) delta[item.produtoId] = (delta[item.produtoId] ?? 0) + item.quantidade;
-  for (const item of consumoNovo) delta[item.produtoId] = (delta[item.produtoId] ?? 0) - item.quantidade;
-  await Promise.all(
-    Object.entries(delta)
-      .filter(([, d]) => d !== 0)
-      .map(([produtoId, d]) => {
-        const produto = produtos.find((p) => p.id === produtoId);
-        if (!produto) return null;
-        const novoSaldo = Math.max(0, produto.estoqueAtual + d);
-        return supabase.from("produtos").update({ estoque_atual: novoSaldo }).eq("id", produtoId);
-      })
-  );
-}
-
 // ─── Root component ───────────────────────────────────────────────────────────
 
 export default function DashboardTabs({
@@ -471,7 +460,7 @@ export default function DashboardTabs({
 
   return (
     <div className="mt-5 sm:mt-8">
-      <div className="flex gap-1.5 overflow-x-auto rounded-3xl border border-[#333333] bg-[#141414]/95 p-2 shadow-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="flex gap-1.5 overflow-x-auto rounded-xl border border-line bg-background/95 p-2 shadow-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {abas.map((aba) => {
           const Icon = aba.icon;
           const ativa = abaAtiva === aba.id;
@@ -480,11 +469,13 @@ export default function DashboardTabs({
             <button
               key={aba.id}
               type="button"
+              aria-label={aba.label}
+              aria-pressed={ativa}
               onClick={() => setAbaAtiva(aba.id)}
-              className={`flex h-10 shrink-0 items-center gap-2 rounded-2xl px-3 sm:px-4 text-sm font-semibold transition ${
+              className={`flex h-10 shrink-0 items-center gap-2 rounded-lg px-3 sm:px-4 text-sm font-semibold transition ${
                 ativa
-                  ? "bg-[#546E7A] text-white shadow-sm"
-                  : "text-[#90A4AE] hover:bg-[#2a2a2a]"
+                  ? "bg-accent text-background shadow-sm"
+                  : "text-steel hover:bg-panel-hover"
               }`}
             >
               <Icon className="h-4 w-4 shrink-0" />
@@ -510,6 +501,7 @@ export default function DashboardTabs({
         {abaAtiva === "compras" && (
           <ComprasModulo usuarioId={usuarioId} dataHoje={dataHoje} />
         )}
+        {abaAtiva === "relatorios" && <RelatoriosModulo dataHoje={dataHoje} />}
         {abaAtiva === "balancete" && (
           <BalanceteModulo usuarioId={usuarioId} dataHoje={dataHoje} />
         )}
@@ -527,7 +519,6 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
   const [vendas, setVendas] = useState<Venda[]>([]);
   const [despesas, setDespesas] = useState<Despesa[]>([]);
   const [produtos, setProdutos] = useState<Produto[]>([]);
-  const [pedidosFabricacao, setPedidosFabricacao] = useState<PedidoFabricacao[]>([]);
   const [balancete, setBalancete] = useState<ItemBalancete[]>([]);
   const [kits, setKits] = useState<Kit[]>([]);
   const [carregando, setCarregando] = useState(true);
@@ -535,6 +526,7 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
   const [termoBusca, setTermoBusca] = useState("");
   const [mensagem, setMensagem] = useState("");
   const [erro, setErro] = useState("");
+  const [erroLeitura, setErroLeitura] = useState("");
   const [form, setForm] = useState({ data: dataHoje, categoria: "", descricao: "", valor: "" });
 
   const [despesaSelecionada, setDespesaSelecionada] = useState<Despesa | null>(null);
@@ -546,27 +538,30 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
     let ativo = true;
     async function carregar() {
       const supabase = createClient();
-      const [{ data: v }, { data: d }, { data: p }, { data: pf }, { data: bl }, { data: kt }] = await Promise.all([
-        supabase.from("vendas").select("*").order("data", { ascending: false }).limit(500),
-        supabase.from("despesas").select("*").order("data", { ascending: false }),
-        supabase.from("produtos").select("*").eq("ativo", true),
-        supabase.from("pedidos_fabricacao").select("*").order("data", { ascending: false }).limit(500),
-        supabase.from("balancete").select("*").order("data", { ascending: false }),
-        supabase.from("kits").select("id, nome, descricao, kit_itens(id, produto_id, quantidade, produtos(nome, codigo))"),
-      ]);
-      if (ativo) {
-        setVendas((v ?? []).map(mapVenda));
-        setDespesas((d ?? []).map(mapDespesa));
-        setProdutos((p ?? []).map(mapProduto));
-        setPedidosFabricacao((pf ?? []).map(mapPedidoFabricacao));
-        setBalancete((bl ?? []).map(mapItemBalancete));
-        setKits((kt ?? []).map(mapKit));
-        setCarregando(false);
+      try {
+        const [v, d, p, bl, kt] = await Promise.all([
+          buscarTodasLinhas(supabase, "vendas"),
+          buscarTodasLinhas(supabase, "despesas"),
+          buscarTodasLinhas(supabase, "produtos"),
+          buscarTodasLinhas(supabase, "balancete"),
+          buscarKitsComItens(supabase),
+        ]);
+        if (ativo) {
+          setVendas(v.map(mapVenda).filter((i) => i.data <= dataHoje));
+          setDespesas(d.map(mapDespesa).filter((i) => i.data <= dataHoje));
+          setProdutos(p.map(mapProduto));
+          setBalancete(bl.map(mapItemBalancete).filter((i) => i.data <= dataHoje));
+          setKits(kt.map(mapKit));
+        }
+      } catch (error) {
+        if (ativo) setErroLeitura(error instanceof Error ? error.message : "Falha ao carregar indicadores.");
+      } finally {
+        if (ativo) setCarregando(false);
       }
     }
     carregar();
     return () => { ativo = false; };
-  }, [usuarioId]);
+  }, [usuarioId, dataHoje]);
 
   async function handleSalvarDespesa(e: React.FormEvent) {
     e.preventDefault();
@@ -645,102 +640,38 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
 
   if (carregando) return <EstadoCarregando texto="Carregando indicadores..." />;
 
+  if (erroLeitura) return <p role="alert" className="rounded-xl border border-red-900/50 bg-red-900/10 p-5 text-red-300">{erroLeitura} Recarregue a página para tentar novamente. Nenhum indicador parcial foi exibido.</p>;
+
   // ─── Financial calculations ───
-  // Receita bruta: valor de tabela × quantidade, sem nenhuma dedução.
-  const receitaBruta = vendas.reduce((s, v) => s + totalBrutoVenda(v), 0);
-  const descontosConcedidos = vendas.reduce((s, v) => s + v.desconto, 0);
-  const taxasMarketplace = vendas.reduce((s, v) => s + v.taxaMarketplace, 0);
-  // Receita líquida: o que de fato entra no caixa após descontos e taxas de marketplace.
-  const receitaLiquida = receitaBruta - descontosConcedidos - taxasMarketplace;
-
-  // Average fabrication unit cost per product
-  const custoUnitFabMap: Record<string, number> = {};
-  produtos.forEach((p) => {
-    const ordens = pedidosFabricacao.filter((pf) => pf.produtoId === p.id);
-    const totalCusto = ordens.reduce((s, pf) => s + pf.valorTotal, 0);
-    const totalQtd = ordens.reduce((s, pf) => s + pf.qtdFabricada, 0);
-    custoUnitFabMap[p.id] = totalQtd > 0 ? totalCusto / totalQtd : 0;
-  });
-
-  // Quantidade de cada produto efetivamente consumida pelas vendas — direta ou via componentes de kit.
-  const consumoPorProduto: Record<string, number> = {};
-  vendas.forEach((v) => {
-    itensConsumidosPelaVenda(v, kits).forEach((item) => {
-      consumoPorProduto[item.produtoId] = (consumoPorProduto[item.produtoId] ?? 0) + item.quantidade;
-    });
-  });
-
-  // COGS: fabrication cost of items actually sold (not total fabricated)
-  const custoFabricacaoVendidos = Object.entries(consumoPorProduto).reduce(
-    (s, [produtoId, qtd]) => s + qtd * (custoUnitFabMap[produtoId] ?? 0),
-    0
-  );
-
-  const totalDespesas = despesas.reduce((s, d) => s + d.valor, 0);
-  // Lucro bruto (contábil): receita líquida menos o custo do produto vendido (COGS).
-  const lucroBruto = receitaLiquida - custoFabricacaoVendidos;
-  // Lucro líquido: lucro bruto menos despesas operacionais (frete, marketing, salários etc.).
-  const lucroLiquido = lucroBruto - totalDespesas;
-  const margemBruta = receitaLiquida > 0 ? (lucroBruto / receitaLiquida) * 100 : 0;
-  const margemLiquida = receitaLiquida > 0 ? (lucroLiquido / receitaLiquida) * 100 : 0;
-
-  // ─── Stock calculations (fabrication-based unit cost) ───
-  const estoqueMovimentos = produtos.map((p) => {
-    const ordens = pedidosFabricacao.filter((pf) => pf.produtoId === p.id);
-    const totalCustoFab = ordens.reduce((s, pf) => s + pf.valorTotal, 0);
-    const totalQtdFab = ordens.reduce((s, pf) => s + pf.qtdFabricada, 0);
-    const custoUnitFab = totalQtdFab > 0 ? totalCustoFab / totalQtdFab : 0;
-    const saidas = consumoPorProduto[p.id] ?? 0;
-    const saldoReal = Math.max(0, totalQtdFab - saidas);
-    return { ...p, saldoReal, custoUnitFab, capital: saldoReal * custoUnitFab };
-  });
-  const capitalTotalEstoque = estoqueMovimentos.reduce((s, p) => s + p.capital, 0);
+  const baseGerencial = { vendas, despesas, produtos, fabricacoes: [], kits };
+  const vendasApuradas = prepararVendas(baseGerencial);
+  const resumo = resumoPeriodo(vendasApuradas, despesas, { inicio: "0001-01-01", fim: dataHoje });
+  const receitaBruta = resumo.bruta;
+  const descontosConcedidos = resumo.descontos;
+  const taxasMarketplace = resumo.taxas;
+  const receitaLiquida = resumo.receitaLiquidaGerencial;
+  const custoFabricacaoVendidos = resumo.cpv;
+  const totalDespesas = resumo.despesasTotal;
+  const lucroBruto = resumo.brutoEstimado;
+  const lucroLiquido = resumo.resultado;
+  const margemBruta = resumo.margemBruta;
+  const margemLiquida = resumo.margem;
+  const estoque = posicaoEstoque(baseGerencial, vendasApuradas, dataHoje);
+  const estoqueMovimentos = estoque.itens.map((p) => ({ ...p, saldoReal: p.estoqueAtual }));
+  const capitalTotalEstoque = estoque.total;
   const totalUnidadesEstoque = estoqueMovimentos.reduce((s, p) => s + p.saldoReal, 0);
-  const produtosAbaixoMinimo = estoqueMovimentos.filter((p) => p.saldoReal <= p.estoqueMinimo);
+  const produtosAbaixoMinimo = estoqueMovimentos.filter((p) => p.ativo && p.saldoReal <= p.estoqueMinimo);
 
   // ─── Chart data ───
-  const ultimos6Meses = obterUltimosMeses(6);
-  const evolucaoMensal = ultimos6Meses.map((mes) => ({
-    name: mes.label,
-    Receita: vendas
-      .filter((v) => v.data.startsWith(mes.prefixo))
-      .reduce((s, v) => s + totalLiquidoVenda(v), 0),
-    Despesas:
-      despesas
-        .filter((d) => d.data.startsWith(mes.prefixo))
-        .reduce((s, d) => s + d.valor, 0) +
-      pedidosFabricacao
-        .filter((pf) => pf.data.startsWith(mes.prefixo))
-        .reduce((s, pf) => s + pf.valorTotal, 0),
-  }));
-  const vendasPorMarketplace = MARKETPLACES.map((mp) => ({
-    name: mp,
-    value: vendas.filter((v) => v.marketplace === mp).reduce((s, v) => s + totalLiquidoVenda(v), 0),
-  })).filter((x) => x.value > 0);
-  const receitaPorProduto = [
-    ...produtos.map((p) => ({
-      name: p.nome,
-      value: vendas.filter((v) => v.produtoId === p.id).reduce((s, v) => s + totalLiquidoVenda(v), 0),
-    })),
-    ...kits.map((k) => ({
-      name: k.nome,
-      value: vendas.filter((v) => v.kitId === k.id).reduce((s, v) => s + totalLiquidoVenda(v), 0),
-    })),
-  ].filter((x) => x.value > 0);
-  const despesasPorCategoria = [
-    ...CATEGORIAS_DESPESA.map((cat) => ({
-      name: cat,
-      value: despesas.filter((d) => d.categoria === cat).reduce((s, d) => s + d.valor, 0),
-    })),
-    {
-      name: "Fabricação",
-      value: pedidosFabricacao.reduce((s, pf) => s + pf.valorTotal, 0),
-    },
-  ].filter((x) => x.value > 0);
-  const custoPorProduto = produtos.map((p) => ({
-    name: p.nome,
-    value: (consumoPorProduto[p.id] ?? 0) * (custoUnitFabMap[p.id] ?? 0),
-  })).filter((x) => x.value > 0);
+  const ultimos6Meses = obterUltimosMeses(6, dataHoje);
+  const evolucaoMensal = ultimos6Meses.map((mes) => {
+    const r = resumoPeriodo(vendasApuradas, despesas, { inicio: `${mes.prefixo}-01`, fim: mes.prefixo === dataHoje.slice(0, 7) ? dataHoje : fimMes(mes.prefixo) });
+    return { name: mes.label, Receita: r.receita, Despesas: r.cpv === null ? null : r.cpv + r.taxas + r.despesasTotal };
+  });
+  const vendasPorMarketplace = agruparValores(vendasApuradas, (v) => v.marketplace || "Outro", (v) => v.aposDescontos).map((i) => ({ name: i.nome, value: i.total })).filter((i) => i.value > 0);
+  const receitaPorProduto = rankingItens(vendasApuradas, baseGerencial, { inicio: "0001-01-01", fim: dataHoje }).map((i) => ({ id: i.id, codigo: i.tipo === "Produto" ? produtos.find((p) => `produto:${p.id}` === i.id)?.codigo || "Sem código" : `Kit ${i.id.slice(4, 12)}`, nome: `${i.nome} (${i.tipo})`, value: i.receita })).filter((i) => i.value > 0);
+  const despesasPorCategoria = agruparValores(despesas, (d) => d.categoria, (d) => d.valor).map((d) => ({ name: d.nome, value: d.total }));
+  const custoPorProduto = agruparValores(vendasApuradas.flatMap((v) => v.custos.filter((i) => i.custo !== null)), (i) => i.produtoId, (i) => i.custo ?? 0).map((i) => ({ id: `produto:${i.nome}`, codigo: produtos.find((p) => p.id === i.nome)?.codigo || "Sem código", nome: produtos.find((p) => p.id === i.nome)?.nome || "Produto sem cadastro", value: i.total })).filter((i) => i.value > 0);
 
   // ─── Balancete calculations ───
   const somaMatheus = balancete.filter((i) => i.nomeComprador === "Matheus").reduce((s, i) => s + i.valorTotal, 0);
@@ -765,37 +696,38 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
     <div className="space-y-8">
 
       {/* ── Indicadores de Receita ── */}
-      <DashSecao titulo="Indicadores de Receita" />
-      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
+      <DashSecao titulo="Indicadores acumulados até hoje" />
+      <p className="text-sm leading-6 text-muted">Todos os lançamentos até {formatarData(dataHoje)}. Para seleção mensal e 12 meses, acesse Relatórios. Valores por lançamento não equivalem a recebimentos ou pagamentos.</p>
+      <div className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
         <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
           <KpiCard titulo="Receita bruta" valor={formatarMoeda(receitaBruta)} />
-          <KpiCard titulo="Receita líquida" valor={formatarMoeda(receitaLiquida)} />
-          <KpiCard titulo="Lucro bruto" valor={formatarMoeda(lucroBruto)} destaque={lucroBruto >= 0} alerta={lucroBruto < 0} />
-          <KpiCard titulo="Lucro líquido" valor={formatarMoeda(lucroLiquido)} destaque={lucroLiquido >= 0} alerta={lucroLiquido < 0} />
+          <KpiCard titulo="Receita líquida gerencial" valor={formatarMoeda(receitaLiquida)} />
+          <KpiCard titulo="Lucro bruto estimado" valor={formatarMoeda(lucroBruto)} destaque={lucroBruto !== null && lucroBruto >= 0} alerta={lucroBruto !== null && lucroBruto < 0} />
+          <KpiCard titulo="Lucro líquido gerencial estimado" valor={formatarMoeda(lucroLiquido)} destaque={lucroLiquido !== null && lucroLiquido >= 0} alerta={lucroLiquido !== null && lucroLiquido < 0} />
         </div>
         <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
           <KpiCard titulo="Descontos concedidos" valor={formatarMoeda(descontosConcedidos)} alerta={descontosConcedidos > 0} />
           <KpiCard titulo="Taxas marketplace" valor={formatarMoeda(taxasMarketplace)} alerta={taxasMarketplace > 0} />
-          <KpiCard titulo="Custo de fabricação (COGS)" valor={formatarMoeda(custoFabricacaoVendidos)} alerta={custoFabricacaoVendidos > 0} />
-          <KpiCard titulo="Despesas operacionais" valor={formatarMoeda(totalDespesas)} alerta={totalDespesas > 0} />
-          <KpiCard titulo="Margem bruta" valor={`${margemBruta.toFixed(1)}%`} destaque={margemBruta >= 0} alerta={margemBruta < 0} />
-          <KpiCard titulo="Margem líquida" valor={`${margemLiquida.toFixed(1)}%`} destaque={margemLiquida >= 0} alerta={margemLiquida < 0} />
+          <KpiCard titulo="CMV estimado" valor={formatarMoeda(custoFabricacaoVendidos)} alerta={custoFabricacaoVendidos !== null && custoFabricacaoVendidos > 0} />
+          <KpiCard titulo="Despesas registradas" valor={formatarMoeda(totalDespesas)} alerta={totalDespesas > 0} />
+          <KpiCard titulo="Margem bruta" valor={margemBruta === null ? "Sem base" : `${margemBruta.toFixed(1)}%`} destaque={margemBruta !== null && margemBruta >= 0} alerta={margemBruta !== null && margemBruta < 0} />
+          <KpiCard titulo="Margem líquida gerencial" valor={margemLiquida === null ? "Sem base" : `${margemLiquida.toFixed(1)}%`} destaque={margemLiquida !== null && margemLiquida >= 0} alerta={margemLiquida !== null && margemLiquida < 0} />
         </div>
-        <p className="mt-4 text-xs leading-5 text-[#78909C]">
-          Receita líquida = bruta − descontos − taxas de marketplace. Lucro bruto = receita líquida − custo de fabricação dos itens vendidos. Lucro líquido = lucro bruto − despesas operacionais. Margem calculada sobre a receita líquida.
+        <p className="mt-4 text-xs leading-5 text-muted">
+          Receita líquida gerencial = bruta − descontos − taxas de marketplace. Vendas após descontos = bruta − descontos. Resultado bruto estimado = vendas após descontos − CMV estimado. Lucro líquido gerencial estimado = resultado bruto − taxas de marketplace − despesas registradas. Margens calculadas sobre vendas após descontos. CMV usa o custo gravado na venda; no histórico sem registro, usa o custo cadastral como estimativa. O resultado não é lucro líquido contábil. {resumo.custosEstimados > 0 ? `${resumo.custosEstimados} vendas usam custo estimado (cadastro/saldo inicial). ` : ""} {resumo.semCusto > 0 ? `${resumo.semCusto} vendas sem custo cadastral ou histórico completo: resultado não apurado.` : ""} {resumo.despesasTaxas > 0 ? "Confira possível duplicidade de taxas nas vendas e despesas." : ""}
         </p>
       </div>
 
       {/* ── Indicadores de Estoque ── */}
       <DashSecao titulo="Indicadores de Estoque" />
-      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
+      <div className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <KpiCard titulo="Capital em estoque" valor={formatarMoeda(capitalTotalEstoque)} destaque />
+          <KpiCard titulo="Estoque atual estimado" valor={formatarMoeda(capitalTotalEstoque)} destaque />
           <KpiCard titulo="Unidades em estoque" valor={String(totalUnidadesEstoque)} />
           <KpiCard titulo="Produtos abaixo do mínimo" valor={String(produtosAbaixoMinimo.length)} alerta={produtosAbaixoMinimo.length > 0} />
         </div>
         {produtosAbaixoMinimo.length > 0 && (
-          <div className="mt-4 rounded-2xl border border-amber-800/50 bg-amber-900/20 p-4">
+          <div className="mt-4 rounded-lg border border-amber-800/50 bg-amber-900/20 p-4">
             <p className="text-sm font-semibold text-amber-400">
               {produtosAbaixoMinimo.length} produto{produtosAbaixoMinimo.length === 1 ? "" : "s"} abaixo do estoque mínimo
             </p>
@@ -813,9 +745,9 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
       {/* ── Evolução Financeira ── */}
       <DashSecao titulo="Evolução Financeira" />
       <div className="grid gap-6 lg:grid-cols-3">
-        <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
-          <p className="text-sm font-semibold text-[#90A4AE]">Últimos 6 meses</p>
-          <h3 className="mt-1 text-lg font-bold">Receita líquida — Tempo</h3>
+        <div className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
+          <p className="text-sm font-semibold text-steel">Últimos 6 meses</p>
+          <h3 className="mt-1 text-lg font-bold">Vendas após descontos — Tempo</h3>
           <div className="mt-4 h-56">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={evolucaoMensal}>
@@ -828,9 +760,9 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
             </ResponsiveContainer>
           </div>
         </div>
-        <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
-          <p className="text-sm font-semibold text-[#90A4AE]">Canais de venda</p>
-          <h3 className="mt-1 text-lg font-bold">Receita líquida por marketplace</h3>
+        <div className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
+          <p className="text-sm font-semibold text-steel">Canais de venda</p>
+          <h3 className="mt-1 text-lg font-bold">Vendas após descontos por marketplace</h3>
           {vendasPorMarketplace.length > 0 ? (
             <div className="mt-4 h-56">
               <ResponsiveContainer width="100%" height="100%">
@@ -844,26 +776,16 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
               </ResponsiveContainer>
             </div>
           ) : (
-            <div className="mt-4 py-12 text-center text-sm text-[#78909C]">Nenhuma venda registrada ainda.</div>
+            <div className="mt-4 py-12 text-center text-sm text-muted">Nenhuma venda registrada ainda.</div>
           )}
         </div>
-        <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
-          <p className="text-sm font-semibold text-[#90A4AE]">Produtos</p>
-          <h3 className="mt-1 text-lg font-bold">Receita líquida por produto</h3>
+        <div className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
+          <p className="text-sm font-semibold text-steel">Produtos</p>
+          <h3 className="mt-1 text-lg font-bold">Vendas após descontos por produto</h3>
           {receitaPorProduto.length > 0 ? (
-            <div className="mt-4 h-56">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={receitaPorProduto} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={46} outerRadius={72}>
-                    {receitaPorProduto.map((_, i) => <Cell key={i} fill={CORES_RECEITA[i % CORES_RECEITA.length]} />)}
-                  </Pie>
-                  <Tooltip formatter={(v) => formatarMoeda(Number(v))} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
+            <RoscaProdutos itens={receitaPorProduto} titulo="Vendas após descontos por produto" />
           ) : (
-            <div className="mt-4 py-12 text-center text-sm text-[#78909C]">Nenhuma venda registrada ainda.</div>
+            <div className="mt-4 py-12 text-center text-sm text-muted">Nenhuma venda registrada ainda.</div>
           )}
         </div>
       </div>
@@ -871,9 +793,9 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
       {/* ── Análise de Despesas ── */}
       <DashSecao titulo="Análise de Despesas" />
       <div className="grid gap-6 lg:grid-cols-3">
-        <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
-          <p className="text-sm font-semibold text-[#90A4AE]">Fluxo mensal</p>
-          <h3 className="mt-1 text-lg font-bold">Receita vs Despesas</h3>
+        <div className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
+          <p className="text-sm font-semibold text-steel">Por data de lançamento</p>
+          <h3 className="mt-1 text-lg font-bold">Vendas vs custos e despesas</h3>
           <div className="mt-4 h-52">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={evolucaoMensal}>
@@ -882,14 +804,14 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
                 <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `R$${(Number(v) / 1000).toFixed(0)}k`} />
                 <Tooltip formatter={(v) => formatarMoeda(Number(v))} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Bar dataKey="Receita" stackId="a" fill="#1565C0" radius={[0, 0, 0, 0]} />
-                <Bar dataKey="Despesas" stackId="a" fill="#C62828" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Receita" fill="#1565C0" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="Despesas" fill="#C62828" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
-        <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
-          <p className="text-sm font-semibold text-[#90A4AE]">Despesas</p>
+        <div className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
+          <p className="text-sm font-semibold text-steel">Despesas</p>
           <h3 className="mt-1 text-lg font-bold">Por categoria</h3>
           {despesasPorCategoria.length > 0 ? (
             <div className="mt-4 h-52">
@@ -904,33 +826,23 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
               </ResponsiveContainer>
             </div>
           ) : (
-            <div className="mt-4 py-10 text-center text-sm text-[#78909C]">Nenhuma despesa registrada.</div>
+            <div className="mt-4 py-10 text-center text-sm text-muted">Nenhuma despesa registrada.</div>
           )}
         </div>
-        <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
-          <p className="text-sm font-semibold text-[#90A4AE]">Custo de fabricação</p>
-          <h3 className="mt-1 text-lg font-bold">Por produto vendido</h3>
+        <div className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
+          <p className="text-sm font-semibold text-steel">Custo das mercadorias vendidas</p>
+          <h3 className="mt-1 text-lg font-bold">CMV identificado por produto</h3>
           {custoPorProduto.length > 0 ? (
-            <div className="mt-4 h-52">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={custoPorProduto} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={46} outerRadius={68}>
-                    {custoPorProduto.map((_, i) => <Cell key={i} fill={CORES[i % CORES.length]} />)}
-                  </Pie>
-                  <Tooltip formatter={(v) => formatarMoeda(Number(v))} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
+            <RoscaProdutos itens={custoPorProduto} titulo="CMV identificado por produto" />
           ) : (
-            <div className="mt-4 py-10 text-center text-sm text-[#78909C]">Nenhuma venda registrada.</div>
+            <div className="mt-4 py-10 text-center text-sm text-muted">Nenhuma venda registrada.</div>
           )}
         </div>
       </div>
 
       {/* ── Indicadores de Balancete ── */}
       <DashSecao titulo="Indicadores de Balancete" />
-      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
+      <div className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <KpiCard titulo="Total Matheus" valor={formatarMoeda(somaMatheus)} />
           <KpiCard titulo="Total Enyo" valor={formatarMoeda(somaEnyo)} />
@@ -943,7 +855,7 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
         {balancete.length > 0 && (
           <div className="mt-6 grid gap-6 lg:grid-cols-2">
             <div>
-              <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Gastos mensais por pessoa</p>
+              <p className="mb-3 text-sm font-semibold text-steel">Gastos mensais por pessoa</p>
               <div className="h-52">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={balancetePorMes}>
@@ -959,7 +871,7 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
               </div>
             </div>
             <div>
-              <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Participação no total</p>
+              <p className="mb-3 text-sm font-semibold text-steel">Participação no total</p>
               <div className="h-52">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
@@ -978,10 +890,10 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
 
       {/* ── Despesas Operacionais ── */}
       <DashSecao titulo="Despesas Operacionais" />
-      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
+      <div className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
         <div className="grid gap-5 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
-          <form onSubmit={handleSalvarDespesa} className="rounded-3xl border border-[#333333] bg-[#181818] p-5">
-            <p className="text-sm font-semibold text-[#90A4AE]">Nova despesa</p>
+          <form onSubmit={handleSalvarDespesa} className="rounded-xl border border-line bg-surface p-5">
+            <p className="text-sm font-semibold text-steel">Nova despesa</p>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <CampoCadastro label="Data" type="date" value={form.data} onChange={(v) => setForm((f) => ({ ...f, data: v }))} required />
               <SelectCadastro label="Categoria" value={form.categoria} onChange={(v) => setForm((f) => ({ ...f, categoria: v }))} options={CATEGORIAS_DESPESA} placeholder="Selecione..." />
@@ -992,7 +904,7 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
             </div>
             <FeedbackBloco mensagem={mensagem} erro={erro} />
             <button type="submit" disabled={salvando}
-              className="mt-5 inline-flex h-11 items-center gap-2 rounded-2xl bg-[#546E7A] px-4 text-sm font-semibold text-white transition hover:bg-[#455A64] disabled:opacity-60">
+              className="mt-5 inline-flex h-11 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-semibold text-background transition hover:bg-accent-dark disabled:opacity-60">
               <Plus className="h-4 w-4" />
               {salvando ? "Salvando..." : "Registrar despesa"}
             </button>
@@ -1001,17 +913,17 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
             <div className="mb-4 flex items-center gap-3">
               <h3 className="text-lg font-bold">Despesas lançadas</h3>
               <div className="relative flex-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#90A4AE]" />
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-steel" />
                 <input type="search" value={termoBusca} onChange={(e) => setTermoBusca(e.target.value)}
-                  className="h-10 w-full rounded-2xl border border-[#333333] bg-[#141414] pl-9 pr-4 text-sm text-[#ECEFF1] outline-none placeholder:text-[#546E7A] focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+                  className="h-10 w-full rounded-lg border border-line bg-background pl-9 pr-4 text-sm text-foreground outline-none placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent-dark"
                   placeholder="Buscar" />
               </div>
             </div>
-            <div className="overflow-hidden rounded-3xl border border-[#333333]">
+            <div className="overflow-hidden rounded-xl border border-line">
               {despesasFiltradas.length > 0 ? (
                 <div className="max-h-[400px] overflow-auto">
-                  <table className="min-w-[480px] w-full bg-[#212121] text-left text-sm">
-                    <thead className="sticky top-0 bg-[#181818] text-[#90A4AE]">
+                  <table className="min-w-[480px] w-full bg-panel text-left text-sm">
+                    <thead className="sticky top-0 bg-surface text-steel">
                       <tr><Th>Data</Th><Th>Categoria</Th><Th>Descrição</Th><Th>Valor</Th><Th>Ações</Th></tr>
                     </thead>
                     <tbody>
@@ -1019,10 +931,10 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
                         <tr
                           key={d.id}
                           onClick={() => abrirDetalheDespesa(d)}
-                          className="cursor-pointer border-t border-[#2a2a2a] transition hover:bg-[#2a2a2a]"
+                          className="cursor-pointer border-t border-panel-hover transition hover:bg-panel-hover"
                         >
                           <Td>{formatarData(d.data)}</Td>
-                          <Td><span className="rounded-full bg-[#CFD8DC] px-2 py-0.5 text-xs font-semibold text-[#546E7A]">{d.categoria}</span></Td>
+                          <Td><span className="rounded-full bg-steel px-2 py-0.5 text-xs font-semibold text-muted">{d.categoria}</span></Td>
                           <Td>{d.descricao}</Td>
                           <Td className="font-semibold text-red-600">{formatarMoeda(d.valor)}</Td>
                           <Td>
@@ -1207,6 +1119,7 @@ function VendasModulo({
     const { data, error } = await supabase
       .from("vendas")
       .insert({
+        cmv_total: null,
         criado_por: usuarioId,
         data: form.data,
         marketplace: form.marketplace,
@@ -1224,7 +1137,7 @@ function VendasModulo({
 
     if (error) {
       setSalvando(false);
-      setErro(error.message);
+      setErro(error.code === "PGRST204" ? "Execute a migração CMV no Supabase antes de registrar vendas." : error.message);
       return;
     }
 
@@ -1232,9 +1145,6 @@ function VendasModulo({
       setVendas((prev) => [mapVenda(data), ...prev]);
     }
 
-    // Decrement stock (do produto direto, ou de cada item do kit vendido)
-    const consumo = itensConsumidosPelaVenda({ produtoId: form.produtoId, kitId: form.kitId, quantidade }, kits);
-    await aplicarDeltaEstoque(supabase, produtos, [], consumo);
     setSalvando(false);
 
     setForm({
@@ -1253,20 +1163,13 @@ function VendasModulo({
 
   async function handleExcluir(id: string) {
     if (!confirm("Excluir esta venda?")) return;
-    const venda = vendas.find((v) => v.id === id);
 
     const supabase = createClient();
     const { error } = await supabase.from("vendas").delete().eq("id", id);
 
     if (error) {
-      setErro(error.message);
+      setErro(error.code === "PGRST204" ? "Execute a migração CMV no Supabase antes de registrar vendas." : error.message);
       return;
-    }
-
-    // Restore stock on sale deletion
-    if (venda) {
-      const consumo = itensConsumidosPelaVenda(venda, kits);
-      await aplicarDeltaEstoque(supabase, produtos, consumo, []);
     }
 
     setVendas((prev) => prev.filter((v) => v.id !== id));
@@ -1307,6 +1210,9 @@ function VendasModulo({
 
     setSalvandoDetalhe(true);
     setErro("");
+    if (formDetalhe.produtoId !== vendaSelecionada.produtoId || formDetalhe.kitId !== vendaSelecionada.kitId || parseNumero(formDetalhe.quantidade) !== vendaSelecionada.quantidade) {
+      setSalvandoDetalhe(false); setErro("Para corrigir produto, kit ou quantidade, exclua a venda e registre novamente. O estoque será estornado."); return;
+    }
     const supabase = createClient();
     const produtoNovo = formDetalhe.produtoId ? produtos.find((p) => p.id === formDetalhe.produtoId) : null;
     const kitNovo = formDetalhe.kitId ? kits.find((k) => k.id === formDetalhe.kitId) : null;
@@ -1325,22 +1231,11 @@ function VendasModulo({
       atualizado_em: new Date().toISOString(),
     };
 
-    const { error } = await supabase.from("vendas").update(payload).eq("id", vendaSelecionada.id);
+    const { data: vendaSalva, error } = await supabase.from("vendas").update(payload).eq("id", vendaSelecionada.id).select().single();
     setSalvandoDetalhe(false);
-    if (error) { setErro(error.message); return; }
+    if (error) { setErro(error.code === "PGRST204" ? "Execute a migração CMV no Supabase antes de registrar vendas." : error.message); return; }
 
-    // Reconcile stock: reverte o consumo antigo (produto ou kit) e aplica o novo
-    const consumoAntigo = itensConsumidosPelaVenda(vendaSelecionada, kits);
-    const consumoNovo = itensConsumidosPelaVenda(
-      { produtoId: payload.produto_id ?? "", kitId: payload.kit_id ?? "", quantidade: payload.quantidade },
-      kits
-    );
-    await aplicarDeltaEstoque(supabase, produtos, consumoAntigo, consumoNovo);
-
-    const vendaAtualizada: Venda = {
-      ...vendaSelecionada,
-      ...mapVenda({ id: vendaSelecionada.id, criado_por: vendaSelecionada.criadoPor, criado_em: vendaSelecionada.criadoEm, ...payload }),
-    };
+    const vendaAtualizada = mapVenda(vendaSalva);
     setVendas((prev) => prev.map((v) => v.id === vendaSelecionada.id ? vendaAtualizada : v));
     setVendaSelecionada(vendaAtualizada);
     setEditandoDetalhe(false);
@@ -1368,7 +1263,7 @@ function VendasModulo({
   const totalItens = vendas.reduce((s, v) => s + v.quantidade, 0);
 
   return (
-    <section className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
+    <section className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
       <SectionHeader
         tag="Vendas"
         titulo="Registro de vendas"
@@ -1379,15 +1274,15 @@ function VendasModulo({
         <KpiCard titulo="Vendas registradas" valor={String(vendas.length)} />
         <KpiCard titulo="Itens vendidos" valor={String(totalItens)} />
         <KpiCard titulo="Receita bruta" valor={formatarMoeda(totalBruto)} />
-        <KpiCard titulo="Receita líquida" valor={formatarMoeda(totalLiquido)} destaque />
+        <KpiCard titulo="Receita líquida gerencial" valor={formatarMoeda(totalLiquido)} destaque />
       </div>
 
       <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <form
           onSubmit={handleSalvar}
-          className="rounded-3xl border border-[#333333] bg-[#181818] p-5 min-w-0"
+          className="rounded-xl border border-line bg-surface p-5 min-w-0"
         >
-          <p className="text-sm font-semibold text-[#90A4AE]">Nova venda</p>
+          <p className="text-sm font-semibold text-steel">Nova venda</p>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <CampoCadastro
               label="Data"
@@ -1408,7 +1303,7 @@ function VendasModulo({
               <select
                 value={form.produtoId ? `produto:${form.produtoId}` : form.kitId ? `kit:${form.kitId}` : ""}
                 onChange={(e) => selecionarItemVenda(e.target.value)}
-                className="w-full rounded-2xl border border-[#333333] bg-[#141414] px-4 py-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+                className="w-full rounded-lg border border-line bg-background px-4 py-3 text-sm text-foreground outline-none focus:border-accent focus:ring-2 focus:ring-accent-dark"
               >
                 <option value="">Selecione um produto ou kit...</option>
                 <optgroup label="Produtos">
@@ -1468,7 +1363,7 @@ function VendasModulo({
           <button
             type="submit"
             disabled={salvando || carregando}
-            className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-[#546E7A] px-4 text-sm font-semibold text-white transition hover:bg-[#455A64] disabled:opacity-60 sm:w-auto"
+            className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent px-4 text-sm font-semibold text-background transition hover:bg-accent-dark disabled:opacity-60 sm:w-auto"
           >
             <Plus className="h-4 w-4" />
             {salvando ? "Salvando..." : "Registrar venda"}
@@ -1478,27 +1373,27 @@ function VendasModulo({
         <div className="min-w-0">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-sm font-semibold text-[#90A4AE]">Histórico</p>
+              <p className="text-sm font-semibold text-steel">Histórico</p>
               <h3 className="mt-1 text-xl font-bold">Vendas registradas</h3>
-              <p className="mt-0.5 text-xs text-[#78909C]">Clique em uma venda para ver detalhes e editar.</p>
+              <p className="mt-0.5 text-xs text-muted">Clique em uma venda para ver detalhes e editar.</p>
             </div>
             <div className="relative sm:min-w-64">
-              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#90A4AE]" />
+              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-steel" />
               <input
                 type="search"
                 value={termoBusca}
                 onChange={(e) => setTermoBusca(e.target.value)}
-                className="h-11 w-full rounded-2xl border border-[#333333] bg-[#141414] pl-11 pr-4 text-sm text-[#ECEFF1] outline-none placeholder:text-[#546E7A] focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+                className="h-11 w-full rounded-lg border border-line bg-background pl-11 pr-4 text-sm text-foreground outline-none placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent-dark"
                 placeholder="Buscar venda"
               />
             </div>
           </div>
 
-          <div className="mt-4 overflow-hidden rounded-3xl border border-[#333333]">
+          <div className="mt-4 overflow-hidden rounded-xl border border-line">
             {vendasFiltradas.length > 0 ? (
               <div className="max-h-[480px] overflow-x-auto overflow-y-auto">
-                <table className="w-full min-w-[560px] bg-[#212121] text-left text-sm">
-                  <thead className="sticky top-0 bg-[#181818] text-[#90A4AE]">
+                <table className="w-full min-w-[560px] bg-panel text-left text-sm">
+                  <thead className="sticky top-0 bg-surface text-steel">
                     <tr>
                       <Th>Data</Th>
                       <Th>Marketplace</Th>
@@ -1514,7 +1409,7 @@ function VendasModulo({
                       <tr
                         key={v.id}
                         onClick={() => abrirDetalhe(v)}
-                        className="cursor-pointer border-t border-[#2a2a2a] transition hover:bg-[#2a2a2a]"
+                        className="cursor-pointer border-t border-panel-hover transition hover:bg-panel-hover"
                       >
                         <Td>{formatarData(v.data)}</Td>
                         <Td>
@@ -1523,13 +1418,13 @@ function VendasModulo({
                         <Td className="font-semibold">
                           {v.produtoNome || "-"}
                           {v.kitId && (
-                            <span className="ml-1.5 rounded-full bg-[#546E7A]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#90A4AE]">kit</span>
+                            <span className="ml-1.5 rounded-full bg-accent/20 px-1.5 py-0.5 text-[10px] font-semibold text-steel">kit</span>
                           )}
                         </Td>
                         <Td>{v.quantidade}</Td>
                         <Td>{formatarMoeda(totalBrutoVenda(v))}</Td>
-                        <Td className="font-semibold text-[#90A4AE]">{formatarMoeda(totalLiquidoVenda(v))}</Td>
-                        <Td className="text-xs text-[#78909C]">{nomeUsuario(usuariosMap, v.criadoPor)}</Td>
+                        <Td className="font-semibold text-steel">{formatarMoeda(totalLiquidoVenda(v))}</Td>
+                        <Td className="text-xs text-muted">{nomeUsuario(usuariosMap, v.criadoPor)}</Td>
                       </tr>
                     ))}
                   </tbody>
@@ -1568,7 +1463,7 @@ function VendasModulo({
                       setFormDetalhe((f) => ({ ...f, produtoId: "", kitId: "" }));
                     }
                   }}
-                  className="w-full rounded-2xl border border-[#333333] bg-[#141414] px-4 py-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+                  className="w-full rounded-lg border border-line bg-background px-4 py-3 text-sm text-foreground outline-none focus:border-accent focus:ring-2 focus:ring-accent-dark"
                 >
                   <option value="">Selecione um produto ou kit...</option>
                   <optgroup label="Produtos">
@@ -1602,9 +1497,9 @@ function VendasModulo({
               {vendaSelecionada.kitId && (() => {
                 const kit = kits.find((k) => k.id === vendaSelecionada.kitId);
                 return kit ? (
-                  <div className="border-b border-[#2a2a2a] py-2.5 text-sm">
-                    <span className="text-[#90A4AE]">Consumo do estoque</span>
-                    <ul className="mt-1.5 space-y-1 text-xs text-[#78909C]">
+                  <div className="border-b border-panel-hover py-2.5 text-sm">
+                    <span className="text-steel">Consumo do estoque</span>
+                    <ul className="mt-1.5 space-y-1 text-xs text-muted">
                       {kit.itens.map((it) => (
                         <li key={it.id}>
                           {it.quantidade * vendaSelecionada.quantidade}× {it.produtoNome}
@@ -1618,7 +1513,7 @@ function VendasModulo({
               <LinhaDetalhe label="Subtotal bruto" valor={formatarMoeda(vendaSelecionada.valorUnitario * vendaSelecionada.quantidade)} />
               <LinhaDetalhe label="Desconto" valor={`- ${formatarMoeda(vendaSelecionada.desconto)}`} alerta={vendaSelecionada.desconto > 0} />
               <LinhaDetalhe label="Taxa marketplace" valor={`- ${formatarMoeda(vendaSelecionada.taxaMarketplace)}`} alerta={vendaSelecionada.taxaMarketplace > 0} />
-              <LinhaDetalhe label="Valor líquido recebido" valor={formatarMoeda(totalLiquidoVenda(vendaSelecionada))} destaque />
+              <LinhaDetalhe label="Valor após descontos e taxas" valor={formatarMoeda(totalLiquidoVenda(vendaSelecionada))} destaque />
               {vendaSelecionada.observacao && <LinhaDetalhe label="Observação" valor={vendaSelecionada.observacao} />}
               <HistoricoRegistro
                 usuariosMap={usuariosMap}
@@ -1698,18 +1593,18 @@ function CadastroModulo({
   ];
 
   return (
-    <section className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
+    <section className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <SectionHeader
           tag="Cadastro"
           titulo="Cadastros do sistema"
           descricao="Produtos, matérias-primas, clientes e fornecedores."
         />
-        <div className="flex flex-wrap gap-2 rounded-3xl border border-[#333333] bg-[#181818] p-2 shrink-0">
+        <div className="flex flex-wrap gap-2 rounded-xl border border-line bg-surface p-2 shrink-0">
           {ABAS_C.map((t) => (
             <button key={t.id} type="button" onClick={() => setAba(t.id)}
-              className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
-                aba === t.id ? "bg-[#546E7A] text-white" : "text-[#90A4AE] hover:bg-[#2a2a2a]"
+              className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                aba === t.id ? "bg-accent text-background" : "text-steel hover:bg-panel-hover"
               }`}>
               {t.label}
             </button>
@@ -1754,6 +1649,7 @@ function ProdutosSubModulo({
   setProdutos: React.Dispatch<React.SetStateAction<Produto[]>>;
   materiasPrimas: MateriaPrima[];
 }) {
+  const [produtoSite, setProdutoSite] = useState<Produto | null>(null);
   const [salvando, setSalvando] = useState(false);
   const [termoBusca, setTermoBusca] = useState("");
   const [editandoId, setEditandoId] = useState<string | null>(null);
@@ -1768,6 +1664,7 @@ function ProdutosSubModulo({
     precoVenda: "",
     estoqueMinimo: "",
     ativo: true,
+    publicarSite: true,
   }));
   const [compRascunho, setCompRascunho] = useState<CompRascunho[]>([]);
 
@@ -1817,7 +1714,7 @@ function ProdutosSubModulo({
       link_compra: formComp.linkCompra.trim(),
     }).select().single();
     setSalvandoComp(false);
-    if (error) { setErro(error.message); return; }
+    if (error) { setErro(error.code === "PGRST204" || error.code === "42703" ? "A integração do portfólio precisa ser configurada no Supabase. Execute o script de integração antes de salvar produtos." : error.message); return; }
     if (data) setCompEdicao((prev) => [...prev, mapComponente(data)]);
     setFormComp({ materiaPrimaId: "", nomePeca: "", quantidade: "1", linkCompra: "" });
   }
@@ -1826,7 +1723,7 @@ function ProdutosSubModulo({
     if (!confirm("Remover este componente?")) return;
     const supabase = createClient();
     const { error } = await supabase.from("componentes_produto").delete().eq("id", compId);
-    if (error) { setErro(error.message); return; }
+    if (error) { setErro(error.code === "PGRST204" || error.code === "42703" ? "A integração do portfólio precisa ser configurada no Supabase. Execute o script de integração antes de salvar produtos." : error.message); return; }
     setCompEdicao((prev) => prev.filter((c) => c.id !== compId));
   }
 
@@ -1839,6 +1736,7 @@ function ProdutosSubModulo({
       precoVenda: "",
       estoqueMinimo: "",
       ativo: true,
+    publicarSite: true,
     });
     setCompRascunho([]); setCompEdicao([]);
     setEditandoId(null); setMensagem(""); setErro("");
@@ -1853,6 +1751,7 @@ function ProdutosSubModulo({
       precoVenda: produto.precoVenda ? String(produto.precoVenda).replace(".", ",") : "",
       estoqueMinimo: produto.estoqueMinimo ? String(produto.estoqueMinimo) : "",
       ativo: produto.ativo,
+      publicarSite: produto.publicarSite,
     });
     setCompRascunho([]);
     setEditandoId(produto.id);
@@ -1912,11 +1811,12 @@ function ProdutosSubModulo({
       preco_venda: parseNumero(form.precoVenda),
       estoque_minimo: parseNumero(form.estoqueMinimo),
       ativo: form.ativo,
+      publicar_site: form.publicarSite,
     };
     if (editandoId) {
-      const { error } = await supabase.from("produtos").update(payload).eq("id", editandoId);
+      const { error } = await supabase.from("produtos").update(payload).eq("id", editandoId).select("id").single();
       setSalvando(false);
-      if (error) { setErro(error.message); return; }
+      if (error) { setErro(error.code === "PGRST204" || error.code === "42703" ? "A integração do portfólio precisa ser configurada no Supabase. Execute o script de integração antes de salvar produtos." : error.message); return; }
       setProdutos((prev) => prev.map((p) => p.id === editandoId ? {
         ...p,
         codigo: payload.codigo,
@@ -1926,11 +1826,12 @@ function ProdutosSubModulo({
         precoVenda: payload.preco_venda,
         estoqueMinimo: payload.estoque_minimo,
         ativo: payload.ativo,
+        publicarSite: payload.publicar_site,
       } : p));
-      setMensagem("Produto atualizado."); limparForm();
+      limparForm(); setMensagem("Produto atualizado. Preferência de publicação salva.");
     } else {
       const { data, error } = await supabase.from("produtos").insert(payload).select().single();
-      if (error) { setSalvando(false); setErro(error.message); return; }
+      if (error) { setSalvando(false); setErro(error.code === "PGRST204" || error.code === "42703" ? "A integração do portfólio precisa ser configurada no Supabase. Execute o script de integração antes de salvar produtos." : error.message); return; }
       if (compRascunho.length > 0) {
         await supabase.from("componentes_produto").insert(
           compRascunho.map((c) => ({ produto_id: data.id, criado_por: usuarioId, materia_prima_id: c.materiaPrimaId || null, nome_peca: c.nomePeca, quantidade: c.quantidade, link_compra: c.linkCompra }))
@@ -1938,7 +1839,7 @@ function ProdutosSubModulo({
       }
       setSalvando(false);
       setProdutos((prev) => [mapProduto(data), ...prev]);
-      setMensagem(`Produto cadastrado com ${compRascunho.length} componente(s).`); limparForm();
+      limparForm(); setMensagem(`Produto cadastrado com ${compRascunho.length} componente(s). ${payload.ativo && payload.publicar_site ? "Disponível no portfólio do site." : "Oculto no portfólio do site."}`);
     }
   }
 
@@ -1946,7 +1847,7 @@ function ProdutosSubModulo({
     if (!confirm("Excluir este produto e seus componentes?")) return;
     const supabase = createClient();
     const { error } = await supabase.from("produtos").delete().eq("id", id);
-    if (error) { setErro(error.message); return; }
+    if (error) { setErro(error.code === "PGRST204" || error.code === "42703" ? "A integração do portfólio precisa ser configurada no Supabase. Execute o script de integração antes de salvar produtos." : error.message); return; }
     setProdutos((prev) => prev.filter((p) => p.id !== id));
     if (editandoId === id) limparForm();
     setMensagem("Produto removido.");
@@ -1961,15 +1862,15 @@ function ProdutosSubModulo({
 
   return (
     <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
-      <form onSubmit={handleSalvar} className="rounded-3xl border border-[#333333] bg-[#181818] p-5 self-start">
-        <p className="text-sm font-semibold text-[#90A4AE]">{editandoId ? "Editando produto" : "Novo produto"}</p>
+      <form onSubmit={handleSalvar} className="rounded-xl border border-line bg-surface p-5 self-start">
+        <p className="text-sm font-semibold text-steel">{editandoId ? "Editando produto" : "Novo produto"}</p>
         <FeedbackBloco mensagem={mensagem} erro={erro} />
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-sm font-medium">Código (SKU)</label>
-            <div className="flex h-[46px] items-center gap-2 rounded-2xl border border-[#333333] bg-[#CFD8DC] px-4 text-sm font-semibold text-[#546E7A] select-none">
+            <div className="flex h-[46px] items-center gap-2 rounded-lg border border-line bg-steel px-4 text-sm font-semibold text-muted select-none">
               <span>{form.codigo}</span>
-              <span className="ml-auto text-xs font-normal text-[#90A4AE]">automático</span>
+              <span className="ml-auto text-xs font-normal text-steel">automático</span>
             </div>
           </div>
           <CampoCadastro label="Nome" value={form.nome} onChange={(v) => setForm((f) => ({ ...f, nome: v }))} placeholder="Nome do produto" required />
@@ -1979,37 +1880,42 @@ function ProdutosSubModulo({
           <CampoCadastro label="Custo" value={form.custo} onChange={(v) => setForm((f) => ({ ...f, custo: v }))} placeholder="0,00" />
           <CampoCadastro label="Preço de venda sugerido" value={form.precoVenda} onChange={(v) => setForm((f) => ({ ...f, precoVenda: v }))} placeholder="0,00" />
           <CampoCadastro label="Estoque mínimo" value={form.estoqueMinimo} onChange={(v) => setForm((f) => ({ ...f, estoqueMinimo: v }))} placeholder="0" />
-          <label className="flex min-h-11 items-center gap-3 rounded-2xl border border-[#333333] bg-[#212121] px-4 py-3 text-sm sm:col-span-2">
+          <label className="flex min-h-11 items-center gap-3 rounded-lg border border-line bg-panel px-4 py-3 text-sm sm:col-span-2">
             <input type="checkbox" checked={form.ativo} onChange={(e) => setForm((f) => ({ ...f, ativo: e.target.checked }))}
-              className="h-4 w-4 rounded border-[#333333] accent-[#546E7A]" />
-            <span className="font-semibold">Ativo</span>
+              className="h-4 w-4 rounded border-line accent-accent" />
+            <span className="font-semibold">Ativo no sistema</span>
+          </label>
+          <label className="flex min-h-11 items-start gap-3 rounded-lg border border-line bg-panel px-4 py-3 text-sm sm:col-span-2">
+            <input type="checkbox" checked={form.publicarSite} onChange={(e) => setForm((f) => ({ ...f, publicarSite: e.target.checked }))}
+              className="mt-1 h-4 w-4 shrink-0 rounded border-line accent-accent" />
+            <span><strong className="block">Exibir no portfólio do site</strong><span className="mt-1 block text-xs leading-5 text-muted">Desmarque para retirar do site sem excluir o cadastro. O produto também precisa estar ativo no sistema. Fotos e links dos produtos vinculados são preservados. Cadastros antigos feitos manualmente no site precisam de vínculo inicial.</span></span>
           </label>
         </div>
 
-        <div className="mt-5 rounded-2xl border border-[#333333] bg-[#212121] p-4">
-          <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Matérias-primas do produto</p>
+        <div className="mt-5 rounded-lg border border-line bg-panel p-4">
+          <p className="mb-3 text-sm font-semibold text-steel">Matérias-primas do produto</p>
           {carregandoComp ? (
-            <p className="py-2 text-xs text-[#78909C]">Carregando componentes...</p>
+            <p className="py-2 text-xs text-muted">Carregando componentes...</p>
           ) : (
             <>
               {componentesAtivos.length > 0 && (
-                <div className="mb-3 overflow-hidden rounded-xl border border-[#2a2a2a]">
+                <div className="mb-3 overflow-hidden rounded-xl border border-panel-hover">
                   <table className="w-full text-left text-xs">
-                    <thead className="bg-[#181818] text-[#90A4AE]">
+                    <thead className="bg-surface text-steel">
                       <tr><Th>Matéria-prima</Th><Th>Qtd</Th>{editandoId && <Th>Link</Th>}<Th>{" "}</Th></tr>
                     </thead>
                     <tbody>
                       {editandoId
                         ? compEdicao.map((c) => (
-                            <tr key={c.id} className="border-t border-[#2a2a2a]">
+                            <tr key={c.id} className="border-t border-panel-hover">
                               <Td className="font-semibold">{c.nomePeca}</Td>
                               <Td>{c.quantidade}</Td>
-                              <Td>{c.linkCompra ? <a href={c.linkCompra} target="_blank" rel="noopener noreferrer" className="text-[#90A4AE] underline">ver</a> : <span className="text-[#90A4AE]">—</span>}</Td>
+                              <Td>{c.linkCompra ? <a href={c.linkCompra} target="_blank" rel="noopener noreferrer" className="text-steel underline">ver</a> : <span className="text-steel">—</span>}</Td>
                               <Td><button type="button" onClick={() => removerCompEdicao(c.id)} className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-red-900/50 text-red-400 hover:bg-red-900/20"><X className="h-3 w-3" /></button></Td>
                             </tr>
                           ))
                         : compRascunho.map((c) => (
-                            <tr key={c.tempId} className="border-t border-[#2a2a2a]">
+                            <tr key={c.tempId} className="border-t border-panel-hover">
                               <Td className="font-semibold">{c.nomePeca}</Td>
                               <Td>{c.quantidade}</Td>
                               <Td><button type="button" onClick={() => setCompRascunho((prev) => prev.filter((x) => x.tempId !== c.tempId))} className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-red-900/50 text-red-400 hover:bg-red-900/20"><X className="h-3 w-3" /></button></Td>
@@ -2023,7 +1929,7 @@ function ProdutosSubModulo({
                 <select value={formComp.materiaPrimaId}
                   onChange={(e) => selecionarMP(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
-                  className="h-10 w-full rounded-xl border border-[#333333] bg-[#212121] px-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]">
+                  className="h-10 w-full rounded-xl border border-line bg-panel px-3 text-sm text-foreground outline-none focus:border-accent">
                   <option value="">Selecionar matéria-prima...</option>
                   {materiasPrimas.map((mp) => (
                     <option key={mp.id} value={mp.id}>{mp.codigo ? `[${mp.codigo}] ` : ""}{mp.nome}</option>
@@ -2043,7 +1949,7 @@ function ProdutosSubModulo({
                       }
                     }}
                     placeholder="Qtd"
-                    className="h-10 w-24 rounded-xl border border-[#333333] bg-[#212121] px-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+                    className="h-10 w-24 rounded-xl border border-line bg-panel px-3 text-sm text-foreground outline-none focus:border-accent"
                   />
                   <button
                     type="button"
@@ -2056,7 +1962,7 @@ function ProdutosSubModulo({
                       }
                     }}
                     disabled={salvandoComp}
-                    className="inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#546E7A] px-4 text-sm font-semibold text-white transition hover:bg-[#455A64] disabled:opacity-50"
+                    className="inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl bg-accent px-4 text-sm font-semibold text-background transition hover:bg-accent-dark disabled:opacity-50"
                   >
                     <Plus className="h-4 w-4 shrink-0" />
                     {salvandoComp ? "Salvando..." : "Adicionar"}
@@ -2072,12 +1978,12 @@ function ProdutosSubModulo({
 
         <div className="mt-5 flex gap-3">
           <button type="submit" disabled={salvando}
-            className="inline-flex h-11 items-center gap-2 rounded-2xl bg-[#546E7A] px-4 text-sm font-semibold text-white transition hover:bg-[#455A64] disabled:opacity-60">
+            className="inline-flex h-11 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-semibold text-background transition hover:bg-accent-dark disabled:opacity-60">
             <Save className="h-4 w-4" />{salvando ? "Salvando..." : editandoId ? "Atualizar" : "Cadastrar produto"}
           </button>
           {editandoId && (
             <button type="button" onClick={limparForm}
-              className="inline-flex h-11 items-center gap-2 rounded-2xl border border-[#333333] bg-[#212121] px-4 text-sm font-semibold text-[#546E7A] transition hover:bg-[#2a2a2a]">
+              className="inline-flex h-11 items-center gap-2 rounded-lg border border-line bg-panel px-4 text-sm font-semibold text-muted transition hover:bg-panel-hover">
               <X className="h-4 w-4" /> Cancelar
             </button>
           )}
@@ -2088,37 +1994,39 @@ function ProdutosSubModulo({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h3 className="text-xl font-bold">{produtos.length} produto(s)</h3>
           <div className="relative sm:min-w-56">
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#90A4AE]" />
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-steel" />
             <input type="search" value={termoBusca} onChange={(e) => setTermoBusca(e.target.value)}
-              className="h-11 w-full rounded-2xl border border-[#333333] bg-[#141414] pl-11 pr-4 text-sm text-[#ECEFF1] outline-none placeholder:text-[#546E7A] focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+              className="h-11 w-full rounded-lg border border-line bg-background pl-11 pr-4 text-sm text-foreground outline-none placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent-dark"
               placeholder="Buscar produto" />
           </div>
         </div>
-        <div className="mt-4 overflow-hidden rounded-3xl border border-[#333333]">
+        <div className="mt-4 overflow-hidden rounded-xl border border-line">
           {produtosFiltrados.length > 0 ? (
             <div className="max-h-[600px] overflow-auto">
-              <table className="min-w-[420px] w-full bg-[#212121] text-left text-sm">
-                <thead className="sticky top-0 bg-[#181818] text-[#90A4AE]">
-                  <tr><Th>Código</Th><Th>Nome</Th><Th>Categoria</Th><Th>Preço venda</Th><Th>Ativo</Th><Th>Ações</Th></tr>
+              <table className="min-w-[420px] w-full bg-panel text-left text-sm">
+                <thead className="sticky top-0 bg-surface text-steel">
+                  <tr><Th>Código</Th><Th>Nome</Th><Th>Categoria</Th><Th>Preço venda</Th><Th>Ativo</Th><Th>Publicação no site</Th><Th>Ações</Th></tr>
                 </thead>
                 <tbody>
                   {produtosFiltrados.map((p) => (
                     <tr
                       key={p.id}
                       onClick={() => abrirDetalhe(p)}
-                      className={`cursor-pointer border-t border-[#2a2a2a] transition hover:bg-[#2a2a2a] ${editandoId === p.id ? "bg-[#CFD8DC]" : ""}`}
+                      className={`cursor-pointer border-t border-panel-hover transition hover:bg-panel-hover ${editandoId === p.id ? "bg-steel" : ""}`}
                     >
-                      <Td className="text-xs text-[#78909C]">{p.codigo || "-"}</Td>
+                      <Td className="text-xs text-muted">{p.codigo || "-"}</Td>
                       <Td className="font-semibold">{p.nome}</Td>
                       <Td>{p.categoria || "-"}</Td>
-                      <Td>{p.precoVenda > 0 ? formatarMoeda(p.precoVenda) : <span className="text-[#90A4AE]">—</span>}</Td>
-                      <Td><span className={`text-xs font-semibold ${p.ativo ? "text-emerald-400" : "text-[#90A4AE]"}`}>{p.ativo ? "Sim" : "Não"}</span></Td>
+                      <Td>{p.precoVenda > 0 ? formatarMoeda(p.precoVenda) : <span className="text-steel">—</span>}</Td>
+                      <Td><span className={`text-xs font-semibold ${p.ativo ? "text-emerald-400" : "text-steel"}`}>{p.ativo ? "Sim" : "Não"}</span></Td>
+                      <Td><span className={`text-xs font-semibold ${p.ativo && p.publicarSite ? "text-emerald-400" : "text-muted"}`}>{p.ativo && p.publicarSite ? "Habilitada" : "Desabilitada"}</span></Td>
                       <Td>
                         <div className="flex gap-1">
                           <button type="button" onClick={(e) => { e.stopPropagation(); iniciarEdicao(p); }}
-                            className="inline-flex h-8 items-center gap-1 rounded-xl border border-[#333333] bg-[#212121] px-2 text-xs font-semibold text-[#546E7A] transition hover:bg-[#2a2a2a]">
+                            className="inline-flex h-8 items-center gap-1 rounded-xl border border-line bg-panel px-2 text-xs font-semibold text-muted transition hover:bg-panel-hover">
                             <Pencil className="h-3.5 w-3.5" /> Editar
                           </button>
+                          {isAdmin && <button type="button" onClick={(e) => { e.stopPropagation(); setProdutoSite(p); }} className="inline-flex min-h-8 items-center rounded-xl border border-line px-2 text-xs font-semibold text-steel">Editar site</button>}
                           {isAdmin && (
                             <button type="button" onClick={(e) => { e.stopPropagation(); handleExcluir(p.id); }}
                               className="inline-flex h-8 items-center gap-1 rounded-xl border border-red-900/50 bg-red-900/10 px-2 text-xs font-semibold text-red-400 transition hover:bg-red-900/30">
@@ -2138,6 +2046,7 @@ function ProdutosSubModulo({
         </div>
       </div>
 
+      {produtoSite && <Modal titulo={`Site · ${produtoSite.nome}`} subtitulo="Portfólio público" onClose={() => setProdutoSite(null)}><ProdutoSiteEditor key={produtoSite.id} produtoId={produtoSite.id} /></Modal>}
       {produtoSelecionado && (
         <Modal
           titulo={produtoSelecionado.nome}
@@ -2147,6 +2056,7 @@ function ProdutosSubModulo({
           <div>
             <LinhaDetalhe label="Código" valor={produtoSelecionado.codigo || "-"} />
             <LinhaDetalhe label="Categoria" valor={produtoSelecionado.categoria || "-"} />
+            <LinhaDetalhe label="Publicação automática no site" valor={produtoSelecionado.ativo && produtoSelecionado.publicarSite ? "Habilitada" : "Desabilitada"} />
             <LinhaDetalhe label="Custo" valor={produtoSelecionado.custo > 0 ? formatarMoeda(produtoSelecionado.custo) : "—"} />
             <LinhaDetalhe label="Preço de venda" valor={produtoSelecionado.precoVenda > 0 ? formatarMoeda(produtoSelecionado.precoVenda) : "—"} destaque />
             <LinhaDetalhe label="Estoque mínimo" valor={produtoSelecionado.estoqueMinimo} />
@@ -2156,24 +2066,24 @@ function ProdutosSubModulo({
               alerta={!produtoSelecionado.ativo}
             />
 
-            <p className="mb-2 mt-5 text-sm font-semibold text-[#90A4AE]">Matérias-primas que compõem o produto</p>
+            <p className="mb-2 mt-5 text-sm font-semibold text-steel">Matérias-primas que compõem o produto</p>
             {carregandoDetalhe ? (
-              <p className="py-3 text-xs text-[#78909C]">Carregando componentes...</p>
+              <p className="py-3 text-xs text-muted">Carregando componentes...</p>
             ) : componentesDetalhe.length > 0 ? (
-              <div className="overflow-auto rounded-xl border border-[#2a2a2a]">
+              <div className="overflow-auto rounded-xl border border-panel-hover">
                 <table className="min-w-[420px] w-full text-left text-xs">
-                  <thead className="bg-[#181818] text-[#90A4AE]">
+                  <thead className="bg-surface text-steel">
                     <tr><Th>Matéria-prima</Th><Th>Qtd</Th><Th>Link</Th></tr>
                   </thead>
                   <tbody>
                     {componentesDetalhe.map((c) => (
-                      <tr key={c.id} className="border-t border-[#2a2a2a]">
+                      <tr key={c.id} className="border-t border-panel-hover">
                         <Td className="font-semibold">{c.nomePeca}</Td>
                         <Td>{c.quantidade}</Td>
                         <Td>
                           {c.linkCompra ? (
-                            <a href={c.linkCompra} target="_blank" rel="noopener noreferrer" className="text-[#90A4AE] underline">Ver</a>
-                          ) : <span className="text-[#90A4AE]">—</span>}
+                            <a href={c.linkCompra} target="_blank" rel="noopener noreferrer" className="text-steel underline">Ver</a>
+                          ) : <span className="text-steel">—</span>}
                         </Td>
                       </tr>
                     ))}
@@ -2181,15 +2091,15 @@ function ProdutosSubModulo({
                 </table>
               </div>
             ) : (
-              <p className="py-3 text-xs text-[#78909C]">Nenhuma matéria-prima cadastrada para este produto.</p>
+              <p className="py-3 text-xs text-muted">Nenhuma matéria-prima cadastrada para este produto.</p>
             )}
           </div>
 
-          <div className="mt-6 flex flex-wrap gap-3 border-t border-[#2a2a2a] pt-5">
+          <div className="mt-6 flex flex-wrap gap-3 border-t border-panel-hover pt-5">
             <button
               type="button"
               onClick={handleEditarDoDetalhe}
-              className="inline-flex h-11 items-center gap-2 rounded-2xl bg-[#546E7A] px-4 text-sm font-semibold text-white transition hover:bg-[#455A64]"
+              className="inline-flex h-11 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-semibold text-background transition hover:bg-accent-dark"
             >
               <Pencil className="h-4 w-4" /> Editar
             </button>
@@ -2197,7 +2107,7 @@ function ProdutosSubModulo({
               <button
                 type="button"
                 onClick={handleExcluirDoDetalhe}
-                className="inline-flex h-11 items-center gap-2 rounded-2xl border border-red-900/50 bg-red-900/10 px-4 text-sm font-semibold text-red-400 transition hover:bg-red-900/30"
+                className="inline-flex h-11 items-center gap-2 rounded-lg border border-red-900/50 bg-red-900/10 px-4 text-sm font-semibold text-red-400 transition hover:bg-red-900/30"
               >
                 <Trash2 className="h-4 w-4" /> Excluir
               </button>
@@ -2389,33 +2299,33 @@ function KitsSubModulo({
 
   return (
     <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
-      <form onSubmit={handleSalvar} className="rounded-3xl border border-[#333333] bg-[#181818] p-5 self-start">
-        <p className="text-sm font-semibold text-[#90A4AE]">{editandoId ? "Editando kit" : "Novo kit"}</p>
+      <form onSubmit={handleSalvar} className="rounded-xl border border-line bg-surface p-5 self-start">
+        <p className="text-sm font-semibold text-steel">{editandoId ? "Editando kit" : "Novo kit"}</p>
         <FeedbackBloco mensagem={mensagem} erro={erro} />
         <div className="mt-4 grid gap-4">
           <CampoCadastro label="Nome do kit" value={form.nome} onChange={(v) => setForm((f) => ({ ...f, nome: v }))} placeholder="Ex: Kit 2 Carrinhos 400kg" required />
           <CampoCadastro label="Descrição" value={form.descricao} onChange={(v) => setForm((f) => ({ ...f, descricao: v }))} placeholder="Observação opcional" />
         </div>
 
-        <div className="mt-5 rounded-2xl border border-[#333333] bg-[#212121] p-4">
-          <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Produtos do kit</p>
+        <div className="mt-5 rounded-lg border border-line bg-panel p-4">
+          <p className="mb-3 text-sm font-semibold text-steel">Produtos do kit</p>
           {itensAtivos.length > 0 && (
-            <div className="mb-3 overflow-hidden rounded-xl border border-[#2a2a2a]">
+            <div className="mb-3 overflow-hidden rounded-xl border border-panel-hover">
               <table className="w-full text-left text-xs">
-                <thead className="bg-[#181818] text-[#90A4AE]">
+                <thead className="bg-surface text-steel">
                   <tr><Th>Produto</Th><Th>Qtd</Th><Th>{" "}</Th></tr>
                 </thead>
                 <tbody>
                   {editandoId
                     ? itensEdicao.map((it) => (
-                        <tr key={it.id} className="border-t border-[#2a2a2a]">
+                        <tr key={it.id} className="border-t border-panel-hover">
                           <Td className="font-semibold">{it.produtoCodigo ? `[${it.produtoCodigo}] ` : ""}{it.produtoNome}</Td>
                           <Td>{it.quantidade}</Td>
                           <Td><button type="button" onClick={() => removerItemEdicao(it.id)} className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-red-900/50 text-red-400 hover:bg-red-900/20"><X className="h-3 w-3" /></button></Td>
                         </tr>
                       ))
                     : itensRascunho.map((it) => (
-                        <tr key={it.tempId} className="border-t border-[#2a2a2a]">
+                        <tr key={it.tempId} className="border-t border-panel-hover">
                           <Td className="font-semibold">{it.produtoCodigo ? `[${it.produtoCodigo}] ` : ""}{it.produtoNome}</Td>
                           <Td>{it.quantidade}</Td>
                           <Td><button type="button" onClick={() => setItensRascunho((prev) => prev.filter((x) => x.tempId !== it.tempId))} className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-red-900/50 text-red-400 hover:bg-red-900/20"><X className="h-3 w-3" /></button></Td>
@@ -2429,7 +2339,7 @@ function KitsSubModulo({
             <select value={formItem.produtoId}
               onChange={(e) => selecionarProdutoItem(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
-              className="h-10 w-full rounded-xl border border-[#333333] bg-[#212121] px-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]">
+              className="h-10 w-full rounded-xl border border-line bg-panel px-3 text-sm text-foreground outline-none focus:border-accent">
               <option value="">Selecionar produto...</option>
               {produtos.map((p) => (
                 <option key={p.id} value={p.id}>{p.codigo ? `[${p.codigo}] ` : ""}{p.nome}</option>
@@ -2449,7 +2359,7 @@ function KitsSubModulo({
                   }
                 }}
                 placeholder="Qtd"
-                className="h-10 w-24 rounded-xl border border-[#333333] bg-[#212121] px-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+                className="h-10 w-24 rounded-xl border border-line bg-panel px-3 text-sm text-foreground outline-none focus:border-accent"
               />
               <button
                 type="button"
@@ -2462,7 +2372,7 @@ function KitsSubModulo({
                   }
                 }}
                 disabled={salvandoItem}
-                className="inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#546E7A] px-4 text-sm font-semibold text-white transition hover:bg-[#455A64] disabled:opacity-50"
+                className="inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl bg-accent px-4 text-sm font-semibold text-background transition hover:bg-accent-dark disabled:opacity-50"
               >
                 <Plus className="h-4 w-4 shrink-0" />
                 {salvandoItem ? "Salvando..." : "Adicionar"}
@@ -2476,12 +2386,12 @@ function KitsSubModulo({
 
         <div className="mt-5 flex gap-3">
           <button type="submit" disabled={salvando}
-            className="inline-flex h-11 items-center gap-2 rounded-2xl bg-[#546E7A] px-4 text-sm font-semibold text-white transition hover:bg-[#455A64] disabled:opacity-60">
+            className="inline-flex h-11 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-semibold text-background transition hover:bg-accent-dark disabled:opacity-60">
             <Save className="h-4 w-4" />{salvando ? "Salvando..." : editandoId ? "Atualizar" : "Cadastrar kit"}
           </button>
           {editandoId && (
             <button type="button" onClick={limparForm}
-              className="inline-flex h-11 items-center gap-2 rounded-2xl border border-[#333333] bg-[#212121] px-4 text-sm font-semibold text-[#546E7A] transition hover:bg-[#2a2a2a]">
+              className="inline-flex h-11 items-center gap-2 rounded-lg border border-line bg-panel px-4 text-sm font-semibold text-muted transition hover:bg-panel-hover">
               <X className="h-4 w-4" /> Cancelar
             </button>
           )}
@@ -2492,17 +2402,17 @@ function KitsSubModulo({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h3 className="text-xl font-bold">{kits.length} kit(s)</h3>
           <div className="relative sm:min-w-56">
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#90A4AE]" />
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-steel" />
             <input type="search" value={termoBusca} onChange={(e) => setTermoBusca(e.target.value)}
-              className="h-11 w-full rounded-2xl border border-[#333333] bg-[#141414] pl-11 pr-4 text-sm text-[#ECEFF1] outline-none placeholder:text-[#546E7A] focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+              className="h-11 w-full rounded-lg border border-line bg-background pl-11 pr-4 text-sm text-foreground outline-none placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent-dark"
               placeholder="Buscar kit ou produto" />
           </div>
         </div>
-        <div className="mt-4 overflow-hidden rounded-3xl border border-[#333333]">
+        <div className="mt-4 overflow-hidden rounded-xl border border-line">
           {kitsFiltrados.length > 0 ? (
             <div className="max-h-[600px] overflow-auto">
-              <table className="min-w-[420px] w-full bg-[#212121] text-left text-sm">
-                <thead className="sticky top-0 bg-[#181818] text-[#90A4AE]">
+              <table className="min-w-[420px] w-full bg-panel text-left text-sm">
+                <thead className="sticky top-0 bg-surface text-steel">
                   <tr><Th>Kit</Th><Th>Itens</Th><Th>Ações</Th></tr>
                 </thead>
                 <tbody>
@@ -2510,14 +2420,14 @@ function KitsSubModulo({
                     <tr
                       key={k.id}
                       onClick={() => abrirDetalhe(k)}
-                      className={`cursor-pointer border-t border-[#2a2a2a] transition hover:bg-[#2a2a2a] ${editandoId === k.id ? "bg-[#CFD8DC]" : ""}`}
+                      className={`cursor-pointer border-t border-panel-hover transition hover:bg-panel-hover ${editandoId === k.id ? "bg-steel" : ""}`}
                     >
                       <Td className="font-semibold">{k.nome}</Td>
-                      <Td className="text-xs text-[#78909C]">{k.itens.length} produto{k.itens.length === 1 ? "" : "s"}</Td>
+                      <Td className="text-xs text-muted">{k.itens.length} produto{k.itens.length === 1 ? "" : "s"}</Td>
                       <Td>
                         <div className="flex gap-1">
                           <button type="button" onClick={(e) => { e.stopPropagation(); iniciarEdicao(k); }}
-                            className="inline-flex h-8 items-center gap-1 rounded-xl border border-[#333333] bg-[#212121] px-2 text-xs font-semibold text-[#546E7A] transition hover:bg-[#2a2a2a]">
+                            className="inline-flex h-8 items-center gap-1 rounded-xl border border-line bg-panel px-2 text-xs font-semibold text-muted transition hover:bg-panel-hover">
                             <Pencil className="h-3.5 w-3.5" /> Editar
                           </button>
                           {isAdmin && (
@@ -2547,16 +2457,16 @@ function KitsSubModulo({
         >
           <div>
             {kitSelecionado.descricao && <LinhaDetalhe label="Descrição" valor={kitSelecionado.descricao} />}
-            <p className="mb-2 mt-5 text-sm font-semibold text-[#90A4AE]">Produtos que compõem o kit</p>
+            <p className="mb-2 mt-5 text-sm font-semibold text-steel">Produtos que compõem o kit</p>
             {kitSelecionado.itens.length > 0 ? (
-              <div className="overflow-auto rounded-xl border border-[#2a2a2a]">
+              <div className="overflow-auto rounded-xl border border-panel-hover">
                 <table className="min-w-[320px] w-full text-left text-xs">
-                  <thead className="bg-[#181818] text-[#90A4AE]">
+                  <thead className="bg-surface text-steel">
                     <tr><Th>Produto</Th><Th>Qtd</Th></tr>
                   </thead>
                   <tbody>
                     {kitSelecionado.itens.map((it) => (
-                      <tr key={it.id} className="border-t border-[#2a2a2a]">
+                      <tr key={it.id} className="border-t border-panel-hover">
                         <Td className="font-semibold">{it.produtoCodigo ? `[${it.produtoCodigo}] ` : ""}{it.produtoNome}</Td>
                         <Td>{it.quantidade}</Td>
                       </tr>
@@ -2565,15 +2475,15 @@ function KitsSubModulo({
                 </table>
               </div>
             ) : (
-              <p className="py-3 text-xs text-[#78909C]">Nenhum produto cadastrado para este kit.</p>
+              <p className="py-3 text-xs text-muted">Nenhum produto cadastrado para este kit.</p>
             )}
           </div>
 
-          <div className="mt-6 flex flex-wrap gap-3 border-t border-[#2a2a2a] pt-5">
+          <div className="mt-6 flex flex-wrap gap-3 border-t border-panel-hover pt-5">
             <button
               type="button"
               onClick={handleEditarDoDetalhe}
-              className="inline-flex h-11 items-center gap-2 rounded-2xl bg-[#546E7A] px-4 text-sm font-semibold text-white transition hover:bg-[#455A64]"
+              className="inline-flex h-11 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-semibold text-background transition hover:bg-accent-dark"
             >
               <Pencil className="h-4 w-4" /> Editar
             </button>
@@ -2581,7 +2491,7 @@ function KitsSubModulo({
               <button
                 type="button"
                 onClick={handleExcluirDoDetalhe}
-                className="inline-flex h-11 items-center gap-2 rounded-2xl border border-red-900/50 bg-red-900/10 px-4 text-sm font-semibold text-red-400 transition hover:bg-red-900/30"
+                className="inline-flex h-11 items-center gap-2 rounded-lg border border-red-900/50 bg-red-900/10 px-4 text-sm font-semibold text-red-400 transition hover:bg-red-900/30"
               >
                 <Trash2 className="h-4 w-4" /> Excluir
               </button>
@@ -2698,17 +2608,17 @@ function MateriasPrimasSubModulo({
 
   return (
     <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
-      <form onSubmit={handleSalvar} className="rounded-3xl border border-[#333333] bg-[#181818] p-5">
-        <p className="text-sm font-semibold text-[#90A4AE]">
+      <form onSubmit={handleSalvar} className="rounded-xl border border-line bg-surface p-5">
+        <p className="text-sm font-semibold text-steel">
           {editandoId ? "Editando matéria-prima" : "Nova matéria-prima"}
         </p>
         <FeedbackBloco mensagem={mensagem} erro={erro} />
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-sm font-medium">Código</label>
-            <div className="flex h-[46px] items-center gap-2 rounded-2xl border border-[#333333] bg-[#CFD8DC] px-4 text-sm font-semibold text-[#546E7A] select-none">
+            <div className="flex h-[46px] items-center gap-2 rounded-lg border border-line bg-steel px-4 text-sm font-semibold text-muted select-none">
               <span>{form.codigo}</span>
-              <span className="ml-auto text-xs font-normal text-[#90A4AE]">automático</span>
+              <span className="ml-auto text-xs font-normal text-steel">automático</span>
             </div>
           </div>
           <CampoCadastro label="Nome" value={form.nome} onChange={(v) => setForm((f) => ({ ...f, nome: v }))} placeholder="Nome da matéria-prima" required />
@@ -2716,21 +2626,21 @@ function MateriasPrimasSubModulo({
           <div className="sm:col-span-2">
             <CampoCadastro label="Link de compra (e-commerce)" value={form.linkCompra} onChange={(v) => setForm((f) => ({ ...f, linkCompra: v }))} placeholder="https://..." />
           </div>
-          <label className="flex min-h-11 items-center gap-3 rounded-2xl border border-[#333333] bg-[#212121] px-4 py-3 text-sm">
+          <label className="flex min-h-11 items-center gap-3 rounded-lg border border-line bg-panel px-4 py-3 text-sm">
             <input type="checkbox" checked={form.ativo} onChange={(e) => setForm((f) => ({ ...f, ativo: e.target.checked }))}
-              className="h-4 w-4 rounded border-[#333333] accent-[#546E7A]" />
+              className="h-4 w-4 rounded border-line accent-accent" />
             <span className="font-semibold">Ativo</span>
           </label>
         </div>
         <div className="mt-5 flex gap-3">
           <button type="submit" disabled={salvando}
-            className="inline-flex h-11 items-center gap-2 rounded-2xl bg-[#546E7A] px-4 text-sm font-semibold text-white transition hover:bg-[#455A64] disabled:opacity-60">
+            className="inline-flex h-11 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-semibold text-background transition hover:bg-accent-dark disabled:opacity-60">
             <Save className="h-4 w-4" />
             {salvando ? "Salvando..." : editandoId ? "Atualizar" : "Cadastrar"}
           </button>
           {editandoId && (
             <button type="button" onClick={limparForm}
-              className="inline-flex h-11 items-center gap-2 rounded-2xl border border-[#333333] bg-[#212121] px-4 text-sm font-semibold text-[#546E7A] transition hover:bg-[#2a2a2a]">
+              className="inline-flex h-11 items-center gap-2 rounded-lg border border-line bg-panel px-4 text-sm font-semibold text-muted transition hover:bg-panel-hover">
               <X className="h-4 w-4" /> Cancelar
             </button>
           )}
@@ -2741,17 +2651,17 @@ function MateriasPrimasSubModulo({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h3 className="text-xl font-bold">Catálogo</h3>
           <div className="relative sm:min-w-64">
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#90A4AE]" />
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-steel" />
             <input type="search" value={termoBusca} onChange={(e) => setTermoBusca(e.target.value)}
-              className="h-11 w-full rounded-2xl border border-[#333333] bg-[#141414] pl-11 pr-4 text-sm text-[#ECEFF1] outline-none placeholder:text-[#546E7A] focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+              className="h-11 w-full rounded-lg border border-line bg-background pl-11 pr-4 text-sm text-foreground outline-none placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent-dark"
               placeholder="Buscar" />
           </div>
         </div>
-        <div className="mt-4 overflow-hidden rounded-3xl border border-[#333333]">
+        <div className="mt-4 overflow-hidden rounded-xl border border-line">
           {filtradas.length > 0 ? (
             <div className="max-h-[480px] overflow-auto">
-              <table className="min-w-[580px] w-full bg-[#212121] text-left text-sm">
-                <thead className="sticky top-0 bg-[#181818] text-[#90A4AE]">
+              <table className="min-w-[580px] w-full bg-panel text-left text-sm">
+                <thead className="sticky top-0 bg-surface text-steel">
                   <tr>
                     <Th>Código</Th>
                     <Th>Nome</Th>
@@ -2762,20 +2672,20 @@ function MateriasPrimasSubModulo({
                 </thead>
                 <tbody>
                   {filtradas.map((m) => (
-                    <tr key={m.id} className="border-t border-[#2a2a2a]">
-                      <Td className="text-xs text-[#78909C]">{m.codigo || "-"}</Td>
+                    <tr key={m.id} className="border-t border-panel-hover">
+                      <Td className="text-xs text-muted">{m.codigo || "-"}</Td>
                       <Td className="font-semibold">{m.nome}</Td>
                       <Td>{m.unidade}</Td>
                       <Td>
                         {m.linkCompra ? (
                           <a href={m.linkCompra} target="_blank" rel="noopener noreferrer"
-                            className="text-[#90A4AE] underline text-xs">Ver</a>
-                        ) : <span className="text-[#90A4AE]">—</span>}
+                            className="text-steel underline text-xs">Ver</a>
+                        ) : <span className="text-steel">—</span>}
                       </Td>
                       <Td>
                         <div className="flex gap-1">
                           <button type="button" onClick={() => iniciarEdicao(m)}
-                            className="inline-flex h-8 items-center gap-1 rounded-xl border border-[#333333] bg-[#212121] px-2 text-xs font-semibold text-[#546E7A] transition hover:bg-[#2a2a2a]">
+                            className="inline-flex h-8 items-center gap-1 rounded-xl border border-line bg-panel px-2 text-xs font-semibold text-muted transition hover:bg-panel-hover">
                             <Pencil className="h-3.5 w-3.5" />
                           </button>
                           {isAdmin && (
@@ -2869,8 +2779,8 @@ function ClientesSubModulo({
 
   return (
     <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
-      <form onSubmit={handleSalvar} className="rounded-3xl border border-[#333333] bg-[#181818] p-5 self-start">
-        <p className="text-sm font-semibold text-[#90A4AE]">{editandoId ? "Editando cliente" : "Novo cliente"}</p>
+      <form onSubmit={handleSalvar} className="rounded-xl border border-line bg-surface p-5 self-start">
+        <p className="text-sm font-semibold text-steel">{editandoId ? "Editando cliente" : "Novo cliente"}</p>
         <FeedbackBloco mensagem={mensagem} erro={erro} />
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
@@ -2883,12 +2793,12 @@ function ClientesSubModulo({
         </div>
         <div className="mt-5 flex gap-3">
           <button type="submit" disabled={salvando}
-            className="inline-flex h-11 items-center gap-2 rounded-2xl bg-[#546E7A] px-4 text-sm font-semibold text-white transition hover:bg-[#455A64] disabled:opacity-60">
+            className="inline-flex h-11 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-semibold text-background transition hover:bg-accent-dark disabled:opacity-60">
             <Save className="h-4 w-4" />{salvando ? "Salvando..." : editandoId ? "Atualizar" : "Cadastrar"}
           </button>
           {editandoId && (
             <button type="button" onClick={limpar}
-              className="inline-flex h-11 items-center gap-2 rounded-2xl border border-[#333333] bg-[#212121] px-4 text-sm font-semibold text-[#546E7A] transition hover:bg-[#2a2a2a]">
+              className="inline-flex h-11 items-center gap-2 rounded-lg border border-line bg-panel px-4 text-sm font-semibold text-muted transition hover:bg-panel-hover">
               <X className="h-4 w-4" /> Cancelar
             </button>
           )}
@@ -2898,29 +2808,29 @@ function ClientesSubModulo({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h3 className="text-xl font-bold">{clientes.length} cliente(s)</h3>
           <div className="relative sm:min-w-56">
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#90A4AE]" />
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-steel" />
             <input type="search" value={termoBusca} onChange={(e) => setTermoBusca(e.target.value)}
-              className="h-11 w-full rounded-2xl border border-[#333333] bg-[#141414] pl-11 pr-4 text-sm text-[#ECEFF1] outline-none placeholder:text-[#546E7A] focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+              className="h-11 w-full rounded-lg border border-line bg-background pl-11 pr-4 text-sm text-foreground outline-none placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent-dark"
               placeholder="Buscar" />
           </div>
         </div>
-        <div className="mt-4 overflow-hidden rounded-3xl border border-[#333333]">
+        <div className="mt-4 overflow-hidden rounded-xl border border-line">
           {filtrados.length > 0 ? (
             <div className="max-h-[480px] overflow-auto">
-              <table className="min-w-[500px] w-full bg-[#212121] text-left text-sm">
-                <thead className="sticky top-0 bg-[#181818] text-[#90A4AE]">
+              <table className="min-w-[500px] w-full bg-panel text-left text-sm">
+                <thead className="sticky top-0 bg-surface text-steel">
                   <tr><Th>Nome</Th><Th>Contato</Th><Th>Cidade</Th><Th>Ações</Th></tr>
                 </thead>
                 <tbody>
                   {filtrados.map((c) => (
-                    <tr key={c.id} className={`border-t border-[#2a2a2a] ${editandoId === c.id ? "bg-[#CFD8DC]" : ""}`}>
+                    <tr key={c.id} className={`border-t border-panel-hover ${editandoId === c.id ? "bg-steel" : ""}`}>
                       <Td className="font-semibold">{c.nome}</Td>
                       <Td>{c.contato || "-"}</Td>
                       <Td>{c.cidade || "-"}</Td>
                       <Td>
                         <div className="flex gap-1">
                           <button type="button" onClick={() => iniciarEdicao(c)}
-                            className="inline-flex h-8 items-center gap-1 rounded-xl border border-[#333333] bg-[#212121] px-2 text-xs font-semibold text-[#546E7A] transition hover:bg-[#2a2a2a]">
+                            className="inline-flex h-8 items-center gap-1 rounded-xl border border-line bg-panel px-2 text-xs font-semibold text-muted transition hover:bg-panel-hover">
                             <Pencil className="h-3.5 w-3.5" />
                           </button>
                           {isAdmin && (
@@ -3005,8 +2915,8 @@ function FornecedoresSubModulo({
 
   return (
     <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
-      <form onSubmit={handleSalvar} className="rounded-3xl border border-[#333333] bg-[#181818] p-5 self-start">
-        <p className="text-sm font-semibold text-[#90A4AE]">{editandoId ? "Editando fornecedor" : "Novo fornecedor"}</p>
+      <form onSubmit={handleSalvar} className="rounded-xl border border-line bg-surface p-5 self-start">
+        <p className="text-sm font-semibold text-steel">{editandoId ? "Editando fornecedor" : "Novo fornecedor"}</p>
         <FeedbackBloco mensagem={mensagem} erro={erro} />
         <div className="mt-4 grid gap-4">
           <CampoCadastro label="Nome / Razão social" value={form.nome} onChange={(v) => setForm((f) => ({ ...f, nome: v }))} placeholder="Nome do fornecedor" required />
@@ -3015,12 +2925,12 @@ function FornecedoresSubModulo({
         </div>
         <div className="mt-5 flex gap-3">
           <button type="submit" disabled={salvando}
-            className="inline-flex h-11 items-center gap-2 rounded-2xl bg-[#546E7A] px-4 text-sm font-semibold text-white transition hover:bg-[#455A64] disabled:opacity-60">
+            className="inline-flex h-11 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-semibold text-background transition hover:bg-accent-dark disabled:opacity-60">
             <Save className="h-4 w-4" />{salvando ? "Salvando..." : editandoId ? "Atualizar" : "Cadastrar"}
           </button>
           {editandoId && (
             <button type="button" onClick={limpar}
-              className="inline-flex h-11 items-center gap-2 rounded-2xl border border-[#333333] bg-[#212121] px-4 text-sm font-semibold text-[#546E7A] transition hover:bg-[#2a2a2a]">
+              className="inline-flex h-11 items-center gap-2 rounded-lg border border-line bg-panel px-4 text-sm font-semibold text-muted transition hover:bg-panel-hover">
               <X className="h-4 w-4" /> Cancelar
             </button>
           )}
@@ -3028,23 +2938,23 @@ function FornecedoresSubModulo({
       </form>
       <div>
         <h3 className="text-xl font-bold">{fornecedores.length} fornecedor(es)</h3>
-        <div className="mt-4 overflow-hidden rounded-3xl border border-[#333333]">
+        <div className="mt-4 overflow-hidden rounded-xl border border-line">
           {fornecedores.length > 0 ? (
             <div className="max-h-[480px] overflow-auto">
-              <table className="min-w-[400px] w-full bg-[#212121] text-left text-sm">
-                <thead className="sticky top-0 bg-[#181818] text-[#90A4AE]">
+              <table className="min-w-[400px] w-full bg-panel text-left text-sm">
+                <thead className="sticky top-0 bg-surface text-steel">
                   <tr><Th>Nome</Th><Th>Contato</Th><Th>Observação</Th><Th>Ações</Th></tr>
                 </thead>
                 <tbody>
                   {fornecedores.map((f) => (
-                    <tr key={f.id} className={`border-t border-[#2a2a2a] ${editandoId === f.id ? "bg-[#CFD8DC]" : ""}`}>
+                    <tr key={f.id} className={`border-t border-panel-hover ${editandoId === f.id ? "bg-steel" : ""}`}>
                       <Td className="font-semibold">{f.nome}</Td>
                       <Td>{f.contato || "-"}</Td>
-                      <Td className="text-[#78909C]">{f.observacao || "-"}</Td>
+                      <Td className="text-muted">{f.observacao || "-"}</Td>
                       <Td>
                         <div className="flex gap-1">
                           <button type="button" onClick={() => iniciarEdicao(f)}
-                            className="inline-flex h-8 items-center gap-1 rounded-xl border border-[#333333] bg-[#212121] px-2 text-xs font-semibold text-[#546E7A] transition hover:bg-[#2a2a2a]">
+                            className="inline-flex h-8 items-center gap-1 rounded-xl border border-line bg-panel px-2 text-xs font-semibold text-muted transition hover:bg-panel-hover">
                             <Pencil className="h-3.5 w-3.5" />
                           </button>
                           {isAdmin && (
@@ -3075,24 +2985,27 @@ function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [vendas, setVendas] = useState<Venda[]>([]);
   const [pedidosFabricacao, setPedidosFabricacao] = useState<PedidoFabricacao[]>([]);
+  const [reposicoes, setReposicoes] = useState<{id:string;produtoId:string;quantidade:number}[]>([]);
   const [kits, setKits] = useState<Kit[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [termoBusca, setTermoBusca] = useState("");
+  const [erroLeitura, setErroLeitura] = useState("");
 
   async function carregar() {
     setCarregando(true);
     const supabase = createClient();
-    const [{ data: prod }, { data: v }, { data: pf }, { data: kt }] = await Promise.all([
-      supabase.from("produtos").select("*").eq("ativo", true).order("nome"),
-      supabase.from("vendas").select("*"),
-      supabase.from("pedidos_fabricacao").select("*"),
-      supabase.from("kits").select("id, nome, descricao, kit_itens(id, produto_id, quantidade, produtos(nome, codigo))").order("nome"),
-    ]);
-    setProdutos((prod ?? []).map(mapProduto));
-    setVendas((v ?? []).map(mapVenda));
-    setPedidosFabricacao((pf ?? []).map(mapPedidoFabricacao));
-    setKits((kt ?? []).map(mapKit));
-    setCarregando(false);
+    try {
+      const [prod, v, pf, kt, rp] = await Promise.all([
+        buscarTodasLinhas(supabase, "produtos"), buscarTodasLinhas(supabase, "vendas"),
+        buscarTodasLinhas(supabase, "pedidos_fabricacao"),
+        buscarKitsComItens(supabase),
+        buscarTodasLinhas(supabase, "reposicoes_produtos"),
+      ]);
+      setReposicoes(rp.map(i=>({id:String(i.id),produtoId:String(i.produto_id),quantidade:Number(i.quantidade)})));
+      setProdutos(prod.map(mapProduto)); setVendas(v.map(mapVenda));
+      setPedidosFabricacao(pf.map(mapPedidoFabricacao)); setKits(kt.map(mapKit)); setErroLeitura("");
+    } catch (error) { setErroLeitura(error instanceof Error ? error.message : "Falha ao carregar estoque."); }
+    finally { setCarregando(false); }
   }
 
   useEffect(() => {
@@ -3102,23 +3015,22 @@ function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [usuarioId]);
 
+  const hojeEstoque = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
   // Saídas por produto, considerando vendas diretas e o consumo indireto de vendas de kit.
   const saidasPorProduto: Record<string, number> = {};
-  vendas.forEach((v) => {
-    itensConsumidosPelaVenda(v, kits).forEach((item) => {
-      saidasPorProduto[item.produtoId] = (saidasPorProduto[item.produtoId] ?? 0) + item.quantidade;
-    });
-  });
+  const baseEstoque = { produtos, vendas, fabricacoes: pedidosFabricacao, kits, despesas: [] };
+  const apuradas = prepararVendas(baseEstoque);
+  apuradas.filter(v=>v.data<=hojeEstoque).forEach(v=>{for(const item of v.consumo ?? []) saidasPorProduto[item.produtoId]=(saidasPorProduto[item.produtoId]??0)+item.quantidade;});
 
-  // Calculate stock per product from movements; unit cost = avg fabrication cost
-  const movimentos = produtos.map((p) => {
-    const ordens = pedidosFabricacao.filter((pf) => pf.produtoId === p.id);
-    const totalCustoFab = ordens.reduce((s, pf) => s + pf.valorTotal, 0);
-    const entradas = ordens.reduce((s, pf) => s + pf.qtdFabricada, 0);
-    const custoUnitFab = entradas > 0 ? totalCustoFab / entradas : 0;
+  const posicao = posicaoEstoque(baseEstoque, apuradas, hojeEstoque);
+  // Saldo atual cadastrado inclui as movimentações e ajustes existentes.
+  const movimentos = produtos.filter((p) => p.ativo || p.estoqueAtual !== 0).map((p) => {
+    const ordens = pedidosFabricacao.filter((pf) => pf.produtoId === p.id && pf.data <= hojeEstoque);
+    const entradas = ordens.reduce((s, pf) => s + pf.qtdFabricada, 0) + reposicoes.filter(r=>r.produtoId===p.id && !pedidosFabricacao.some(f=>f.id===r.id)).reduce((s,r)=>s+r.quantidade,0);
+    const custoUnitFab = posicao.itens.find((i) => i.id === p.id)?.custo ?? null;
     const saidas = saidasPorProduto[p.id] ?? 0;
-    const saldo = Math.max(0, entradas - saidas);
-    return { produto: p, entradas, saidas, saldo, custoUnitFab, capital: saldo * custoUnitFab };
+    const saldo = p.estoqueAtual;
+    return { produto: p, entradas, saidas, saldo, custoUnitFab, capital: posicao.itens.find((i) => i.id === p.id)?.valor ?? null };
   });
 
   const movimentosFiltrados = movimentos.filter((m) => {
@@ -3126,8 +3038,8 @@ function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
     return !q || m.produto.nome.toLowerCase().includes(q) || m.produto.codigo.toLowerCase().includes(q);
   });
 
-  const capitalTotal = movimentos.reduce((s, m) => s + m.capital, 0);
-  const abaixoMinimo = movimentos.filter((m) => m.saldo <= m.produto.estoqueMinimo);
+  const capitalTotal = posicao.total;
+  const abaixoMinimo = movimentos.filter((m) => m.produto.ativo && m.saldo <= m.produto.estoqueMinimo);
   const totalUnidades = movimentos.reduce((s, m) => s + m.saldo, 0);
 
   // Quantos kits dá pra montar com o estoque atual: o gargalo é o item com menor saldo relativo à quantidade exigida.
@@ -3135,7 +3047,7 @@ function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
     const quantidadeMontavel = kit.itens.length === 0 ? 0 : Math.min(
       ...kit.itens.map((it) => {
         const saldoItem = movimentos.find((m) => m.produto.id === it.produtoId)?.saldo ?? 0;
-        return it.quantidade > 0 ? Math.floor(saldoItem / it.quantidade) : 0;
+        return it.quantidade > 0 ? Math.max(0, Math.floor(saldoItem / it.quantidade)) : 0;
       })
     );
     return { kit, quantidadeMontavel };
@@ -3156,12 +3068,14 @@ function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
 
   if (carregando) return <EstadoCarregando texto="Carregando estoque..." />;
 
+  if (erroLeitura) return <p role="alert" className="p-5 text-red-300">{erroLeitura} Nenhum saldo parcial foi exibido.</p>;
+
   return (
-    <section className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
+    <section className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
       <SectionHeader
         tag="Estoque"
         titulo="Inventário de produtos"
-        descricao="Saldo calculado automaticamente: entradas via fabricação e saídas via vendas."
+        descricao="Saldo atual cadastrado. Valor pelo custo médio de reposição ou pelo custo cadastral estimado; consulte a metodologia em Relatórios."
       />
 
       <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -3171,8 +3085,8 @@ function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
       </div>
 
       <div className="mt-6 grid gap-5 lg:grid-cols-2">
-        <div className="rounded-3xl border border-[#333333] bg-[#181818] p-4 sm:p-6">
-          <p className="text-sm font-semibold text-[#90A4AE]">Itens avulsos</p>
+        <div className="rounded-xl border border-line bg-surface p-4 sm:p-6">
+          <p className="text-sm font-semibold text-steel">Itens avulsos</p>
           <h3 className="mt-1 text-lg font-bold">Saldo por produto</h3>
           {dadosGraficoEstoque.length > 0 ? (
             <div className="mt-4 max-h-80 overflow-y-auto">
@@ -3200,12 +3114,12 @@ function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
               </div>
             </div>
           ) : (
-            <div className="mt-4 py-10 text-center text-sm text-[#78909C]">Nenhum produto ativo cadastrado.</div>
+            <div className="mt-4 py-10 text-center text-sm text-muted">Nenhum produto ativo cadastrado.</div>
           )}
         </div>
 
-        <div className="rounded-3xl border border-[#333333] bg-[#181818] p-4 sm:p-6">
-          <p className="text-sm font-semibold text-[#90A4AE]">Kits</p>
+        <div className="rounded-xl border border-line bg-surface p-4 sm:p-6">
+          <p className="text-sm font-semibold text-steel">Kits</p>
           <h3 className="mt-1 text-lg font-bold">Quantidade montável</h3>
           {dadosGraficoKits.length > 0 ? (
             <div className="mt-4 max-h-80 overflow-y-auto">
@@ -3233,37 +3147,37 @@ function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
               </div>
             </div>
           ) : (
-            <div className="mt-4 py-10 text-center text-sm text-[#78909C]">Nenhum kit cadastrado.</div>
+            <div className="mt-4 py-10 text-center text-sm text-muted">Nenhum kit cadastrado.</div>
           )}
         </div>
       </div>
 
       <div className="mt-5 flex items-center gap-3">
         <div className="relative flex-1 sm:max-w-64">
-          <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#90A4AE]" />
+          <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-steel" />
           <input
             type="search"
             value={termoBusca}
             onChange={(e) => setTermoBusca(e.target.value)}
-            className="h-11 w-full rounded-2xl border border-[#333333] bg-[#141414] pl-11 pr-4 text-sm text-[#ECEFF1] outline-none placeholder:text-[#546E7A] focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+            className="h-11 w-full rounded-lg border border-line bg-background pl-11 pr-4 text-sm text-foreground outline-none placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent-dark"
             placeholder="Buscar produto"
           />
         </div>
         <button
           type="button"
           onClick={carregar}
-          className="inline-flex h-11 items-center gap-2 rounded-2xl border border-[#333333] bg-[#212121] px-4 text-sm font-semibold text-[#546E7A] transition hover:bg-[#2a2a2a]"
+          className="inline-flex h-11 items-center gap-2 rounded-lg border border-line bg-panel px-4 text-sm font-semibold text-muted transition hover:bg-panel-hover"
         >
           <RefreshCw className="h-4 w-4" />
           Atualizar
         </button>
       </div>
 
-      <div className="mt-4 overflow-hidden rounded-3xl border border-[#333333]">
+      <div className="mt-4 overflow-hidden rounded-xl border border-line">
         {movimentosFiltrados.length > 0 ? (
           <div className="overflow-auto">
-            <table className="min-w-[820px] w-full bg-[#212121] text-left text-sm">
-              <thead className="bg-[#181818] text-[#90A4AE]">
+            <table className="min-w-[820px] w-full bg-panel text-left text-sm">
+              <thead className="bg-surface text-steel">
                 <tr>
                   <Th>Código</Th>
                   <Th>Produto</Th>
@@ -3279,8 +3193,8 @@ function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
                 {movimentosFiltrados.map(({ produto: p, entradas, saidas, saldo, custoUnitFab, capital }) => {
                   const abaixo = saldo <= p.estoqueMinimo;
                   return (
-                    <tr key={p.id} className={`border-t border-[#2a2a2a] ${abaixo ? "bg-red-900/10" : ""}`}>
-                      <Td className="text-xs text-[#78909C]">{p.codigo || "-"}</Td>
+                    <tr key={p.id} className={`border-t border-panel-hover ${abaixo ? "bg-red-900/10" : ""}`}>
+                      <Td className="text-xs text-muted">{p.codigo || "-"}</Td>
                       <Td className="font-semibold">{p.nome}</Td>
                       <Td>
                         <span className="font-semibold text-emerald-400">{entradas}</span>
@@ -3289,7 +3203,7 @@ function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
                         <span className="font-semibold text-red-600">{saidas}</span>
                       </Td>
                       <Td>
-                        <span className={`font-bold text-base ${abaixo ? "text-red-600" : "text-[#90A4AE]"}`}>
+                        <span className={`font-bold text-base ${abaixo ? "text-red-600" : "text-steel"}`}>
                           {saldo}
                         </span>
                         {abaixo && (
@@ -3298,22 +3212,22 @@ function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
                           </span>
                         )}
                       </Td>
-                      <Td className="text-[#78909C]">{p.estoqueMinimo}</Td>
-                      <Td>{custoUnitFab > 0 ? formatarMoeda(custoUnitFab) : <span className="text-[#90A4AE]">—</span>}</Td>
-                      <Td className="font-semibold text-[#ECEFF1]">{capital > 0 ? formatarMoeda(capital) : <span className="text-[#90A4AE]">—</span>}</Td>
+                      <Td className="text-muted">{p.estoqueMinimo}</Td>
+                      <Td>{custoUnitFab !== null && custoUnitFab > 0 ? formatarMoeda(custoUnitFab) : <span className="text-steel">—</span>}</Td>
+                      <Td className="font-semibold text-foreground">{formatarMoeda(capital)}</Td>
                     </tr>
                   );
                 })}
               </tbody>
-              <tfoot className="border-t-2 border-[#333333] bg-[#181818]">
+              <tfoot className="border-t-2 border-line bg-surface">
                 <tr>
-                  <td colSpan={4} className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-[#78909C]">
+                  <td colSpan={4} className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted">
                     Total
                   </td>
-                  <td className="px-4 py-3 font-bold text-[#90A4AE]">{totalUnidades}</td>
+                  <td className="px-4 py-3 font-bold text-steel">{totalUnidades}</td>
                   <td />
                   <td />
-                  <td className="px-4 py-3 font-bold text-[#90A4AE]">{formatarMoeda(capitalTotal)}</td>
+                  <td className="px-4 py-3 font-bold text-steel">{formatarMoeda(capitalTotal)}</td>
                 </tr>
               </tfoot>
             </table>
@@ -3325,15 +3239,15 @@ function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
 
       {kits.length > 0 && (
         <div className="mt-8">
-          <p className="text-sm font-semibold text-[#90A4AE]">Kits</p>
+          <p className="text-sm font-semibold text-steel">Kits</p>
           <h3 className="mt-1 text-xl font-bold">Quantidade montável com o estoque atual</h3>
-          <p className="mt-0.5 text-xs text-[#78909C]">
+          <p className="mt-0.5 text-xs text-muted">
             Calculado pelo item do kit com menor saldo disponível em relação à quantidade exigida.
           </p>
-          <div className="mt-4 overflow-hidden rounded-3xl border border-[#333333]">
+          <div className="mt-4 overflow-hidden rounded-xl border border-line">
             <div className="overflow-auto">
-              <table className="min-w-[560px] w-full bg-[#212121] text-left text-sm">
-                <thead className="bg-[#181818] text-[#90A4AE]">
+              <table className="min-w-[560px] w-full bg-panel text-left text-sm">
+                <thead className="bg-surface text-steel">
                   <tr>
                     <Th>Kit</Th>
                     <Th>Composição</Th>
@@ -3342,9 +3256,9 @@ function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
                 </thead>
                 <tbody>
                   {kitsComEstoque.map(({ kit, quantidadeMontavel }) => (
-                    <tr key={kit.id} className={`border-t border-[#2a2a2a] ${quantidadeMontavel <= 0 ? "bg-red-900/10" : ""}`}>
+                    <tr key={kit.id} className={`border-t border-panel-hover ${quantidadeMontavel <= 0 ? "bg-red-900/10" : ""}`}>
                       <Td className="font-semibold">{kit.nome}</Td>
-                      <Td className="text-xs text-[#78909C]">
+                      <Td className="text-xs text-muted">
                         {kit.itens.map((it, i) => (
                           <span key={it.id}>
                             {i > 0 && ", "}
@@ -3353,7 +3267,7 @@ function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
                         ))}
                       </Td>
                       <Td>
-                        <span className={`font-bold text-base ${quantidadeMontavel <= 0 ? "text-red-600" : "text-[#90A4AE]"}`}>
+                        <span className={`font-bold text-base ${quantidadeMontavel <= 0 ? "text-red-600" : "text-steel"}`}>
                           {quantidadeMontavel}
                         </span>
                       </Td>
@@ -3677,35 +3591,35 @@ function ComprasModulo({
   if (carregando) return <EstadoCarregando texto="Carregando compras..." />;
 
   return (
-    <section className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
+    <section className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <SectionHeader
           tag="Compras"
-          titulo="Pedidos de compra"
-          descricao="Registre pedidos de compra e ordens de fabricação."
+          titulo="Compras e reposição"
+          descricao="Reponha produtos para revenda e acompanhe as entradas de mercadoria."
         />
-        <div className="flex flex-wrap gap-2 rounded-3xl border border-[#333333] bg-[#181818] p-2 self-start">
-          {(["pedidos", "fabricacao", "historico-precos"] as const).map((t) => (
+        <div className="flex flex-wrap gap-2 rounded-xl border border-line bg-surface p-2 self-start">
+          {(["fabricacao", "pedidos", "historico-precos"] as const).map((t) => (
             <button
               key={t}
               type="button"
               onClick={() => setAba(t)}
-              className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
+              className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
                 aba === t
-                  ? "bg-[#546E7A] text-white"
-                  : "text-[#90A4AE] hover:bg-[#2a2a2a]"
+                  ? "bg-accent text-background"
+                  : "text-steel hover:bg-panel-hover"
               }`}
             >
-              {t === "pedidos" ? "Pedidos" : t === "fabricacao" ? "Fabricação" : "Estatísticas"}
+              {t === "pedidos" ? "Pedidos" : t === "fabricacao" ? "Compras / reposição" : "Estatísticas"}
             </button>
           ))}
         </div>
       </div>
 
       <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <KpiCard titulo="Total de pedidos" valor={String(pedidos.length)} />
+        <KpiCard titulo="Pedidos de matéria-prima" valor={String(pedidos.length)} />
         <KpiCard titulo="Pedidos pendentes" valor={String(pendentes)} alerta={pendentes > 0} />
-        <KpiCard titulo="Total em compras" valor={formatarMoeda(totalCompras)} />
+        <KpiCard titulo="Valor dos pedidos" valor={formatarMoeda(totalCompras)} />
       </div>
 
       <FeedbackBloco mensagem={mensagem} erro={erro} className="mt-5" />
@@ -3714,16 +3628,16 @@ function ComprasModulo({
         <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
           <form
             onSubmit={handleSalvarPedido}
-            className="rounded-3xl border border-[#333333] bg-[#181818] p-5"
+            className="rounded-xl border border-line bg-surface p-5"
           >
-            <p className="text-sm font-semibold text-[#90A4AE]">Novo pedido</p>
+            <p className="text-sm font-semibold text-steel">Novo pedido</p>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <div className="sm:col-span-2">
                 <label className="mb-1 block text-sm font-medium">Fornecedor</label>
                 <select
                   value={formPedido.fornecedorId}
                   onChange={(e) => setFormPedido((f) => ({ ...f, fornecedorId: e.target.value }))}
-                  className="w-full rounded-2xl border border-[#333333] bg-[#212121] px-4 py-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+                  className="w-full rounded-lg border border-line bg-panel px-4 py-3 text-sm text-foreground outline-none focus:border-accent focus:ring-2 focus:ring-accent-dark"
                 >
                   <option value="">Selecione...</option>
                   {fornecedores.map((f) => (
@@ -3749,21 +3663,21 @@ function ComprasModulo({
             <button
               type="button"
               onClick={() => setDividirBalancete((v) => !v)}
-              className={`mt-4 flex w-full items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-left transition ${
+              className={`mt-4 flex w-full items-center justify-between gap-3 rounded-lg border px-4 py-3 text-left transition ${
                 dividirBalancete
-                  ? "border-[#546E7A] bg-[#546E7A]/15"
-                  : "border-[#333333] bg-[#212121] hover:bg-[#2a2a2a]"
+                  ? "border-accent bg-accent/15"
+                  : "border-line bg-panel hover:bg-panel-hover"
               }`}
             >
               <span>
-                <span className="block text-sm font-semibold text-[#ECEFF1]">Dividir no balancete entre os sócios</span>
-                <span className="mt-0.5 block text-xs text-[#78909C]">
+                <span className="block text-sm font-semibold text-foreground">Dividir no balancete entre os sócios</span>
+                <span className="mt-0.5 block text-xs text-muted">
                   {dividirBalancete
                     ? "Ligado: lança metade do valor pra Matheus e metade pra Enyo."
                     : "Desligado: lança o valor integral no balancete pra quem estiver registrando."}
                 </span>
               </span>
-              <span className={`relative h-6 w-11 shrink-0 rounded-full transition ${dividirBalancete ? "bg-[#546E7A]" : "bg-[#333333]"}`}>
+              <span className={`relative h-6 w-11 shrink-0 rounded-full transition ${dividirBalancete ? "bg-accent" : "bg-line"}`}>
                 <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${dividirBalancete ? "left-5" : "left-0.5"}`} />
               </span>
             </button>
@@ -3771,18 +3685,18 @@ function ComprasModulo({
             <button
               type="submit"
               disabled={salvando}
-              className="mt-5 inline-flex h-11 items-center gap-2 rounded-2xl bg-[#546E7A] px-4 text-sm font-semibold text-white transition hover:bg-[#455A64] disabled:opacity-60"
+              className="mt-5 inline-flex h-11 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-semibold text-background transition hover:bg-accent-dark disabled:opacity-60"
             >
               <Plus className="h-4 w-4" />
               {salvando ? "Salvando..." : "Registrar pedido"}
             </button>
           </form>
 
-          <div className="overflow-hidden rounded-3xl border border-[#333333]">
+          <div className="overflow-hidden rounded-xl border border-line">
             {pedidos.length > 0 ? (
               <div className="max-h-[480px] overflow-auto">
-                <table className="min-w-[560px] w-full bg-[#212121] text-left text-sm">
-                  <thead className="sticky top-0 bg-[#181818] text-[#90A4AE]">
+                <table className="min-w-[560px] w-full bg-panel text-left text-sm">
+                  <thead className="sticky top-0 bg-surface text-steel">
                     <tr>
                       <Th>Data</Th>
                       <Th>Fornecedor</Th>
@@ -3797,7 +3711,7 @@ function ComprasModulo({
                       <tr
                         key={p.id}
                         onClick={() => abrirDetalhePedido(p)}
-                        className="cursor-pointer border-t border-[#2a2a2a] transition hover:bg-[#2a2a2a]"
+                        className="cursor-pointer border-t border-panel-hover transition hover:bg-panel-hover"
                       >
                         <Td>{formatarData(p.data)}</Td>
                         <Td className="font-semibold">{p.fornecedorNome || "-"}</Td>
@@ -3806,7 +3720,7 @@ function ComprasModulo({
                           {custoUnitPorPedido[p.id] !== undefined ? (
                             `${formatarMoeda(custoUnitPorPedido[p.id])}/un`
                           ) : (
-                            <span className="text-[#78909C]">—</span>
+                            <span className="text-muted">—</span>
                           )}
                         </Td>
                         <Td>
@@ -3827,7 +3741,7 @@ function ComprasModulo({
                             <option value="cancelado">Cancelado</option>
                           </select>
                         </Td>
-                        <Td className="text-xs text-[#78909C]">{nomeUsuario(usuariosMap, p.criadoPor)}</Td>
+                        <Td className="text-xs text-muted">{nomeUsuario(usuariosMap, p.criadoPor)}</Td>
                       </tr>
                     ))}
                   </tbody>
@@ -3866,7 +3780,7 @@ function ComprasModulo({
                 <select
                   value={formDetalhe.fornecedorId}
                   onChange={(e) => setFormDetalhe((f) => ({ ...f, fornecedorId: e.target.value }))}
-                  className="w-full rounded-2xl border border-[#333333] bg-[#141414] px-4 py-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+                  className="w-full rounded-lg border border-line bg-background px-4 py-3 text-sm text-foreground outline-none focus:border-accent focus:ring-2 focus:ring-accent-dark"
                 >
                   <option value="">Selecione...</option>
                   {fornecedores.map((f) => (
@@ -3903,13 +3817,13 @@ function ComprasModulo({
               <LinhaDetalhe label="Valor total" valor={formatarMoeda(pedidoSelecionado.valorTotal)} destaque />
               {pedidoSelecionado.observacao && <LinhaDetalhe label="Observação" valor={pedidoSelecionado.observacao} />}
 
-              {carregandoItens && <p className="mt-3 text-xs text-[#78909C]">Carregando itens...</p>}
+              {carregandoItens && <p className="mt-3 text-xs text-muted">Carregando itens...</p>}
               {!carregandoItens && itensPedidoSelecionado.length > 0 && (
                 <div className="mt-4">
-                  <p className="mb-2 text-sm font-semibold text-[#90A4AE]">Itens</p>
-                  <div className="overflow-x-auto rounded-2xl border border-[#2a2a2a]">
+                  <p className="mb-2 text-sm font-semibold text-steel">Itens</p>
+                  <div className="overflow-x-auto rounded-lg border border-panel-hover">
                     <table className="w-full min-w-[420px] text-left text-sm">
-                      <thead className="bg-[#181818] text-[#90A4AE]">
+                      <thead className="bg-surface text-steel">
                         <tr>
                           <Th>Descrição</Th>
                           <Th>Qtd.</Th>
@@ -3919,18 +3833,18 @@ function ComprasModulo({
                       </thead>
                       <tbody>
                         {itensPedidoSelecionado.map((item) => (
-                          <tr key={item.id} className="border-t border-[#2a2a2a]">
+                          <tr key={item.id} className="border-t border-panel-hover">
                             <Td>{item.descricao}</Td>
                             <Td>{item.quantidade}</Td>
                             <Td>{formatarMoeda(item.valorUnitario)}</Td>
-                            <Td className="font-semibold text-[#90A4AE]">{formatarMoeda(item.valorTotal)}</Td>
+                            <Td className="font-semibold text-steel">{formatarMoeda(item.valorTotal)}</Td>
                           </tr>
                         ))}
                       </tbody>
                       <tfoot>
-                        <tr className="border-t border-[#2a2a2a] bg-[#181818]">
-                          <Td colSpan={3} className="text-right font-semibold text-[#90A4AE]">Total</Td>
-                          <Td className="font-semibold text-[#90A4AE]">
+                        <tr className="border-t border-panel-hover bg-surface">
+                          <Td colSpan={3} className="text-right font-semibold text-steel">Total</Td>
+                          <Td className="font-semibold text-steel">
                             {formatarMoeda(itensPedidoSelecionado.reduce((s, i) => s + i.valorTotal, 0))}
                           </Td>
                         </tr>
@@ -4118,21 +4032,21 @@ function HistoricoPrecosModulo({ materiasPrimas }: { materiasPrimas: MateriaPrim
 
   return (
     <div className="mt-6 space-y-6">
-      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
+      <div className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <SectionHeader
             tag="Compras"
             titulo="Estatísticas de custo"
             descricao="Custo por unidade fabricada de um produto, com drilldown pras matérias-primas usadas — ou veja direto o histórico de preço de uma matéria-prima."
           />
-          <div className="flex flex-wrap gap-2 rounded-3xl border border-[#333333] bg-[#181818] p-2 self-start">
+          <div className="flex flex-wrap gap-2 rounded-xl border border-line bg-surface p-2 self-start">
             {(["produto", "materia-prima"] as const).map((m) => (
               <button
                 key={m}
                 type="button"
                 onClick={() => { setModo(m); setSelecao(null); }}
-                className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
-                  modo === m ? "bg-[#546E7A] text-white" : "text-[#90A4AE] hover:bg-[#2a2a2a]"
+                className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                  modo === m ? "bg-accent text-background" : "text-steel hover:bg-panel-hover"
                 }`}
               >
                 {m === "produto" ? "Por produto" : "Por matéria-prima"}
@@ -4148,7 +4062,7 @@ function HistoricoPrecosModulo({ materiasPrimas }: { materiasPrimas: MateriaPrim
               <select
                 value={produtoId}
                 onChange={(e) => { setProdutoId(e.target.value); setSelecao(null); }}
-                className="w-full rounded-2xl border border-[#333333] bg-[#181818] px-4 py-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+                className="w-full rounded-lg border border-line bg-surface px-4 py-3 text-sm text-foreground outline-none focus:border-accent focus:ring-2 focus:ring-accent-dark"
               >
                 <option value="">{carregandoProdutos ? "Carregando..." : "Selecione..."}</option>
                 {produtos.map((p) => (
@@ -4159,17 +4073,17 @@ function HistoricoPrecosModulo({ materiasPrimas }: { materiasPrimas: MateriaPrim
 
             {produtoId && (
               carregandoProduto ? (
-                <p className="mt-5 text-sm text-[#78909C]">Carregando...</p>
+                <p className="mt-5 text-sm text-muted">Carregando...</p>
               ) : (
                 <>
                   <div className="flex items-center justify-between">
-                    <p className="mb-2 mt-5 text-sm font-semibold text-[#90A4AE]">Custo por unidade fabricada</p>
+                    <p className="mb-2 mt-5 text-sm font-semibold text-steel">Custo por unidade fabricada</p>
                     {componentes.length > 0 && (
                       <button
                         type="button"
                         onClick={verVariacaoDeTodasAsMateriasPrimas}
                         disabled={carregandoTodos}
-                        className="mb-2 mt-5 inline-flex h-8 items-center gap-1 rounded-xl border border-[#333333] bg-[#212121] px-2 text-xs font-semibold text-[#546E7A] hover:bg-[#2a2a2a] disabled:opacity-60"
+                        className="mb-2 mt-5 inline-flex h-8 items-center gap-1 rounded-xl border border-line bg-panel px-2 text-xs font-semibold text-muted hover:bg-panel-hover disabled:opacity-60"
                       >
                         <RefreshCw className="h-3.5 w-3.5" /> Atualizar variação
                       </button>
@@ -4188,10 +4102,10 @@ function HistoricoPrecosModulo({ materiasPrimas }: { materiasPrimas: MateriaPrim
                       </ResponsiveContainer>
                     </div>
                   ) : (
-                    <p className="py-6 text-center text-sm text-[#78909C]">Nenhum pedido de fabricação registrado pra esse produto ainda.</p>
+                    <p className="py-6 text-center text-sm text-muted">Nenhum pedido de fabricação registrado pra esse produto ainda.</p>
                   )}
 
-                  <p className="mb-2 mt-6 text-sm font-semibold text-[#90A4AE]">
+                  <p className="mb-2 mt-6 text-sm font-semibold text-steel">
                     Matérias-primas usadas — clique numa pra focar o histórico dela sozinha
                   </p>
                   {componentes.length > 0 ? (
@@ -4203,24 +4117,24 @@ function HistoricoPrecosModulo({ materiasPrimas }: { materiasPrimas: MateriaPrim
                           onClick={() => selecionarComponente(comp)}
                           className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
                             selecao?.nome === comp.nomePeca
-                              ? "border-[#546E7A] bg-[#546E7A]/20 text-[#ECEFF1]"
-                              : "border-[#333333] bg-[#181818] text-[#90A4AE] hover:bg-[#2a2a2a]"
+                              ? "border-accent bg-accent/20 text-foreground"
+                              : "border-line bg-surface text-steel hover:bg-panel-hover"
                           }`}
                         >
                           {comp.nomePeca}
-                          {!comp.materiaPrimaId && <span className="ml-1 text-[#78909C]">(sem vínculo)</span>}
+                          {!comp.materiaPrimaId && <span className="ml-1 text-muted">(sem vínculo)</span>}
                         </button>
                       ))}
                     </div>
                   ) : (
-                    <p className="text-sm text-[#78909C]">Esse produto não tem matérias-primas cadastradas na BOM.</p>
+                    <p className="text-sm text-muted">Esse produto não tem matérias-primas cadastradas na BOM.</p>
                   )}
 
                   {mostrarTodos && (
                     <div className="mt-6">
-                      <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Variação de preço — todas as matérias-primas</p>
+                      <p className="mb-3 text-sm font-semibold text-steel">Variação de preço — todas as matérias-primas</p>
                       {carregandoTodos ? (
-                        <p className="text-sm text-[#78909C]">Carregando...</p>
+                        <p className="text-sm text-muted">Carregando...</p>
                       ) : (
                         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                           {componentes.map((comp) => {
@@ -4233,9 +4147,9 @@ function HistoricoPrecosModulo({ materiasPrimas }: { materiasPrimas: MateriaPrim
                                 key={comp.id}
                                 type="button"
                                 onClick={() => selecionarComponente(comp)}
-                                className="rounded-2xl border border-[#2a2a2a] bg-[#141414] p-3 text-left transition hover:border-[#546E7A]"
+                                className="rounded-lg border border-panel-hover bg-background p-3 text-left transition hover:border-accent"
                               >
-                                <p className="truncate text-xs font-semibold text-[#90A4AE]">{comp.nomePeca}</p>
+                                <p className="truncate text-xs font-semibold text-steel">{comp.nomePeca}</p>
                                 {dadosMini.length > 0 ? (
                                   <div className="mt-2 h-24">
                                     <ResponsiveContainer width="100%" height="100%">
@@ -4247,7 +4161,7 @@ function HistoricoPrecosModulo({ materiasPrimas }: { materiasPrimas: MateriaPrim
                                     </ResponsiveContainer>
                                   </div>
                                 ) : (
-                                  <p className="mt-2 py-6 text-center text-xs text-[#78909C]">Sem preço registrado ainda.</p>
+                                  <p className="mt-2 py-6 text-center text-xs text-muted">Sem preço registrado ainda.</p>
                                 )}
                               </button>
                             );
@@ -4269,7 +4183,7 @@ function HistoricoPrecosModulo({ materiasPrimas }: { materiasPrimas: MateriaPrim
                 const mp = materiasPrimas.find((m) => m.id === e.target.value);
                 setSelecao(mp ? { materiaPrimaId: mp.id, nome: mp.nome } : null);
               }}
-              className="w-full rounded-2xl border border-[#333333] bg-[#181818] px-4 py-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+              className="w-full rounded-lg border border-line bg-surface px-4 py-3 text-sm text-foreground outline-none focus:border-accent focus:ring-2 focus:ring-accent-dark"
             >
               <option value="">{materiasPrimas.length === 0 ? "Nenhuma matéria-prima cadastrada" : "Selecione..."}</option>
               {materiasPrimas.map((mp) => (
@@ -4281,17 +4195,17 @@ function HistoricoPrecosModulo({ materiasPrimas }: { materiasPrimas: MateriaPrim
       </div>
 
       {selecao && (
-        <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
+        <div className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-sm font-semibold text-[#90A4AE]">Histórico de preço</p>
+              <p className="text-sm font-semibold text-steel">Histórico de preço</p>
               <h3 className="mt-1 text-lg font-bold">{selecao.nome}</h3>
             </div>
             {modo === "produto" && (
               <button
                 type="button"
                 onClick={() => setSelecao(null)}
-                className="inline-flex h-9 items-center gap-1 rounded-xl border border-[#333333] bg-[#181818] px-3 text-xs font-semibold text-[#546E7A] hover:bg-[#2a2a2a]"
+                className="inline-flex h-9 items-center gap-1 rounded-xl border border-line bg-surface px-3 text-xs font-semibold text-muted hover:bg-panel-hover"
               >
                 ← Voltar aos componentes
               </button>
@@ -4301,9 +4215,9 @@ function HistoricoPrecosModulo({ materiasPrimas }: { materiasPrimas: MateriaPrim
           {erro && <p className="mt-3 text-sm text-amber-400">{erro}</p>}
 
           {carregandoPreco ? (
-            <p className="mt-5 text-sm text-[#78909C]">Carregando histórico...</p>
+            <p className="mt-5 text-sm text-muted">Carregando histórico...</p>
           ) : pontosPreco.length === 0 ? (
-            <p className="mt-5 text-sm text-[#78909C]">Nenhum preço registrado ainda (nem em compras, nem em fabricação).</p>
+            <p className="mt-5 text-sm text-muted">Nenhum preço registrado ainda (nem em compras, nem em fabricação).</p>
           ) : (
             <>
               <div className="mt-5 grid grid-cols-3 gap-3">
@@ -4326,23 +4240,23 @@ function HistoricoPrecosModulo({ materiasPrimas }: { materiasPrimas: MateriaPrim
                   </LineChart>
                 </ResponsiveContainer>
               </div>
-              <div className="mt-2 flex items-center gap-4 text-xs text-[#78909C]">
+              <div className="mt-2 flex items-center gap-4 text-xs text-muted">
                 <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: COR_ORIGEM_COMPRA }} /> Compra</span>
                 <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: COR_ORIGEM_FABRICACAO }} /> Fabricação</span>
               </div>
 
-              <div className="mt-5 overflow-x-auto rounded-2xl border border-[#2a2a2a]">
+              <div className="mt-5 overflow-x-auto rounded-lg border border-panel-hover">
                 <table className="min-w-[480px] w-full text-left text-sm">
-                  <thead className="bg-[#181818] text-[#90A4AE]">
+                  <thead className="bg-surface text-steel">
                     <tr><Th>Data</Th><Th>Origem</Th><Th>Referência</Th><Th>Preço unitário</Th></tr>
                   </thead>
                   <tbody>
                     {pontosPreco.map((p, i) => (
-                      <tr key={i} className="border-t border-[#2a2a2a]">
+                      <tr key={i} className="border-t border-panel-hover">
                         <Td>{formatarData(p.data)}</Td>
-                        <Td className="text-xs text-[#78909C]">{p.origem === "compra" ? "Compra" : "Fabricação"}</Td>
+                        <Td className="text-xs text-muted">{p.origem === "compra" ? "Compra" : "Fabricação"}</Td>
                         <Td>{p.referencia}</Td>
-                        <Td className="font-semibold text-[#90A4AE]">{formatarMoeda(p.valorUnitario)}</Td>
+                        <Td className="font-semibold text-steel">{formatarMoeda(p.valorUnitario)}</Td>
                       </tr>
                     ))}
                   </tbody>
@@ -4436,6 +4350,9 @@ function FabricacaoSubModulo({
   const [mensagem, setMensagem] = useState("");
   const [erro, setErro] = useState("");
 
+  const [compraDireta, setCompraDireta] = useState(true);
+  const [custoCompra, setCustoCompra] = useState("");
+  const tentativaCompra = useRef<{assinatura:string;id:string}|null>(null);
   const [produtoId, setProdutoId] = useState("");
   const [qtdFabricada, setQtdFabricada] = useState("1");
   const [dataFab, setDataFab] = useState(dataHoje);
@@ -4511,7 +4428,7 @@ function FabricacaoSubModulo({
     return qtdTotal(item.qtdPc) * parseNumero(item.precoUnitario);
   }
 
-  const valorTotalGeral = itens.reduce((s, i) => s + precoTotal(i), 0);
+  const valorTotalGeral = compraDireta ? parseNumero(custoCompra) : itens.reduce((s, i) => s + precoTotal(i), 0);
 
   function atualizarItem(idx: number, campo: keyof ItemFabricacaoRascunho, valor: string) {
     setItens((prev) => prev.map((it, i) => i === idx ? { ...it, [campo]: valor } : it));
@@ -4519,63 +4436,27 @@ function FabricacaoSubModulo({
 
   async function handleSalvar() {
     setErro("");
-    if (!produtoId || !dataFab || itens.length === 0) {
-      setErro("Preencha produto, data e carregue os componentes.");
+    if (!produtoId || dataFab !== dataHoje || parseNumero(qtdFabricada)<=0 || valorTotalGeral<=0 || (!compraDireta && itens.length === 0)) {
+      setErro("Informe produto, quantidade e custo positivos. Registre o recebimento na data de hoje.");
       return;
     }
     const produto = produtos.find((p) => p.id === produtoId);
     setSalvando(true);
     const supabase = createClient();
 
-    const { data: pedido, error: errPedido } = await supabase
-      .from("pedidos_fabricacao")
-      .insert({
-        criado_por: usuarioId,
-        produto_id: produtoId,
-        produto_nome: produto?.nome ?? "",
-        qtd_fabricada: parseNumero(qtdFabricada),
-        data: dataFab,
-        valor_total: valorTotalGeral,
-        observacao: observacao.trim(),
-      })
-      .select()
-      .single();
+    const itensCompra = compraDireta ? [] : itens.map(it=>({nome_peca:it.nomePeca,qtd_pc:it.qtdPc,preco_unitario:parseNumero(it.precoUnitario),fornecedor_nome:it.fornecedorNome}));
+    const assinatura=JSON.stringify({produtoId,qtdFabricada,valorTotalGeral,itensCompra,observacao});
+    if(tentativaCompra.current?.assinatura!==assinatura)tentativaCompra.current={assinatura,id:crypto.randomUUID()};
+    const { data, error: errPedido } = await supabase.rpc("registrar_compra_produto",{
+      p_id:tentativaCompra.current.id,p_produto_id:produtoId,p_quantidade:parseNumero(qtdFabricada),p_valor_total:valorTotalGeral,p_itens:itensCompra,p_observacao:observacao.trim(),
+    });
+    if(errPedido || !data){setSalvando(false);setErro(errPedido?.code==="PGRST202"?"Execute o SQL de unificação de compras e CMV no Supabase.":errPedido?.message??"Não foi possível registrar a compra.");return;}
+    const pedido=Array.isArray(data)?data[0]:data;
+    setPedidos(prev=>[mapPedidoFabricacao(pedido),...prev.filter(p=>p.id!==pedido.id)]);
+    const {data:produtosAtualizados}=await supabase.from("produtos").select("*").eq("ativo",true).order("nome");
+    if(produtosAtualizados)setProdutos(produtosAtualizados.map(mapProduto));
 
-    if (errPedido || !pedido) {
-      setSalvando(false);
-      setErro(errPedido?.message ?? "Erro ao salvar pedido.");
-      return;
-    }
-
-    const linhas = itens.map((it) => ({
-      pedido_id: pedido.id,
-      nome_peca: it.nomePeca,
-      qtd_pc: it.qtdPc,
-      qtd_total: qtdTotal(it.qtdPc),
-      fornecedor_nome: it.fornecedorNome,
-      preco_unitario: parseNumero(it.precoUnitario),
-      preco_total: precoTotal(it),
-    }));
-
-    const { error: errItens } = await supabase.from("itens_fabricacao").insert(linhas);
-    setSalvando(false);
-    if (errItens) { setErro(errItens.message); return; }
-
-    setPedidos((prev) => [mapPedidoFabricacao(pedido), ...prev]);
-
-    // Increment stock after fabrication
-    const produtoFab = produtos.find((p) => p.id === produtoId);
-    if (produtoFab) {
-      const qtdFab = parseNumero(qtdFabricada);
-      await supabase.from("produtos").update({
-        estoque_atual: produtoFab.estoqueAtual + qtdFab,
-      }).eq("id", produtoId);
-      setProdutos((prev) => prev.map((p) =>
-        p.id === produtoId ? { ...p, estoqueAtual: p.estoqueAtual + qtdFab } : p
-      ));
-    }
-
-    const nomeItemBalancete = `Fabricação${produto?.nome ? ` - ${produto.nome}` : ""}`;
+    const nomeItemBalancete = `Compra / reposição${produto?.nome ? ` - ${produto.nome}` : ""}`;
     const avisoBalancete = await lancarCompraNoBalancete({
       dividir: dividirBalancete,
       valorTotal: valorTotalGeral,
@@ -4585,6 +4466,9 @@ function FabricacaoSubModulo({
       usuariosMap,
     });
 
+    tentativaCompra.current=null;
+    setSalvando(false);
+    setCustoCompra("");
     setProdutoId("");
     setQtdFabricada("1");
     setDataFab(dataHoje);
@@ -4594,10 +4478,10 @@ function FabricacaoSubModulo({
     setDividirBalancete(false);
     setMensagem(
       avisoBalancete
-        ? `Pedido de fabricação registrado. ${avisoBalancete}`
+        ? `Compra registrada com estoque e custo médio atualizados. ${avisoBalancete}`
         : valorTotalGeral > 0
-        ? "Pedido de fabricação registrado e lançado no balancete."
-        : "Pedido de fabricação registrado."
+        ? "Compra registrada com estoque e custo médio atualizados e lançado no balancete."
+        : "Compra registrada com estoque e custo médio atualizados."
     );
   }
 
@@ -4679,23 +4563,25 @@ function FabricacaoSubModulo({
     setMensagem("Pedido de fabricação removido.");
   }
 
-  if (carregando) return <EstadoCarregando texto="Carregando fabricação..." />;
+  if (carregando) return <EstadoCarregando texto="Carregando compras..." />;
 
   return (
     <div className="mt-6 space-y-6">
       <FeedbackBloco mensagem={mensagem} erro={erro} />
 
       {/* Formulário de novo pedido */}
-      <div className="rounded-3xl border border-[#333333] bg-[#181818] p-5">
-        <p className="text-sm font-semibold text-[#90A4AE]">Novo pedido de fabricação</p>
+      <div className="rounded-xl border border-line bg-surface p-5">
+        <p className="text-sm font-semibold text-steel">Nova compra / reposição recebida</p>
 
+        <p className="mt-2 text-sm leading-6 text-muted">Esta é a antiga aba de Fabricação, agora usada para compras e reposição. Os lançamentos anteriores são preservados. Novas entradas atualizam o estoque e o custo médio uma única vez.</p>
+        <label className="mt-4 block text-sm">Forma de registrar<select value={compraDireta ? "direta" : "componentes"} onChange={e=>setCompraDireta(e.target.value==="direta")} className="mt-1 block min-h-11 w-full rounded-lg border border-line bg-panel px-3"><option value="direta">Compra de produto pronto</option><option value="componentes">Detalhar custos por componentes</option></select></label>
         <div className="mt-4 grid gap-4 sm:grid-cols-3">
           <div className="sm:col-span-2">
-            <label className="mb-1 block text-sm font-medium">Produto fabricado</label>
+            <label className="mb-1 block text-sm font-medium">Produto comprado</label>
             <select
               value={produtoId}
               onChange={(e) => { setProdutoId(e.target.value); setComponentesCarregados(false); setItens([]); }}
-              className="w-full rounded-2xl border border-[#333333] bg-[#212121] px-4 py-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+              className="w-full rounded-lg border border-line bg-panel px-4 py-3 text-sm text-foreground outline-none focus:border-accent focus:ring-2 focus:ring-accent-dark"
             >
               <option value="">Selecione o produto...</option>
               {produtos.map((p) => (
@@ -4703,28 +4589,29 @@ function FabricacaoSubModulo({
               ))}
             </select>
           </div>
-          <CampoCadastro label="Qtd. fabricada" value={qtdFabricada} onChange={setQtdFabricada} placeholder="1" />
+          <CampoCadastro label="Quantidade recebida" value={qtdFabricada} onChange={setQtdFabricada} placeholder="1" />
           <CampoCadastro label="Data" type="date" value={dataFab} onChange={setDataFab} required />
+          {compraDireta && <div className="sm:col-span-3"><CampoCadastro label="Custo total recebido (incluindo frete)" value={custoCompra} onChange={setCustoCompra} placeholder="0,00" required /></div>}
           <div className="sm:col-span-2">
             <CampoCadastro label="Observação" value={observacao} onChange={setObservacao} placeholder="Detalhe do pedido" />
           </div>
         </div>
 
-        <button
+        {!compraDireta && <button
           type="button"
           onClick={handleCarregarComponentes}
           disabled={carregandoComp || !produtoId}
-          className="mt-4 inline-flex h-10 items-center gap-2 rounded-2xl border border-[#546E7A] bg-[#212121] px-4 text-sm font-semibold text-[#546E7A] transition hover:bg-[#2a2a2a] disabled:opacity-50"
+          className="mt-4 inline-flex h-10 items-center gap-2 rounded-lg border border-accent bg-panel px-4 text-sm font-semibold text-muted transition hover:bg-panel-hover disabled:opacity-50"
         >
           <RefreshCw className="h-4 w-4" />
           {carregandoComp ? "Carregando..." : "Carregar matérias-primas"}
-        </button>
+        </button>}
 
-        {componentesCarregados && itens.length > 0 && (
+        {(compraDireta || (componentesCarregados && itens.length > 0)) && (
           <>
-            <div className="mt-5 overflow-auto rounded-2xl border border-[#333333]">
-              <table className="min-w-[800px] w-full bg-[#212121] text-left text-sm">
-                <thead className="bg-[#181818] text-[#90A4AE]">
+            {!compraDireta && <div className="mt-5 overflow-auto rounded-lg border border-line">
+              <table className="min-w-[800px] w-full bg-panel text-left text-sm">
+                <thead className="bg-surface text-steel">
                   <tr>
                     <Th>Nome da Peça</Th>
                     <Th>Qtd/un</Th>
@@ -4737,21 +4624,21 @@ function FabricacaoSubModulo({
                 </thead>
                 <tbody>
                   {itens.map((it, idx) => (
-                    <tr key={it.componenteId} className="border-t border-[#2a2a2a]">
+                    <tr key={it.componenteId} className="border-t border-panel-hover">
                       <Td className="font-semibold">{it.nomePeca}</Td>
                       <Td>{it.qtdPc}</Td>
-                      <Td className="font-semibold text-[#90A4AE]">{qtdTotal(it.qtdPc)}</Td>
+                      <Td className="font-semibold text-steel">{qtdTotal(it.qtdPc)}</Td>
                       <Td>
                         {it.linkCompra ? (
                           <a href={it.linkCompra} target="_blank" rel="noopener noreferrer"
-                            className="text-[#90A4AE] underline text-xs">Ver</a>
-                        ) : <span className="text-[#90A4AE]">—</span>}
+                            className="text-steel underline text-xs">Ver</a>
+                        ) : <span className="text-steel">—</span>}
                       </Td>
                       <Td>
                         <select
                           value={it.fornecedorNome}
                           onChange={(e) => atualizarItem(idx, "fornecedorNome", e.target.value)}
-                          className="w-36 rounded-xl border border-[#333333] bg-[#212121] px-2 py-1.5 text-xs text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+                          className="w-36 rounded-xl border border-line bg-panel px-2 py-1.5 text-xs text-foreground outline-none focus:border-accent"
                         >
                           <option value="">—</option>
                           {fornecedores.map((f) => (
@@ -4764,7 +4651,7 @@ function FabricacaoSubModulo({
                           type="text"
                           value={it.precoUnitario}
                           onChange={(e) => atualizarItem(idx, "precoUnitario", e.target.value)}
-                          className="w-24 rounded-xl border border-[#333333] bg-[#212121] px-2 py-1.5 text-xs text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+                          className="w-24 rounded-xl border border-line bg-panel px-2 py-1.5 text-xs text-foreground outline-none focus:border-accent"
                           placeholder="0,00"
                         />
                       </Td>
@@ -4773,43 +4660,43 @@ function FabricacaoSubModulo({
                   ))}
                 </tbody>
               </table>
-            </div>
+            </div>}
 
             <button
               type="button"
               onClick={() => setDividirBalancete((v) => !v)}
-              className={`mt-4 flex w-full items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-left transition ${
+              className={`mt-4 flex w-full items-center justify-between gap-3 rounded-lg border px-4 py-3 text-left transition ${
                 dividirBalancete
-                  ? "border-[#546E7A] bg-[#546E7A]/15"
-                  : "border-[#333333] bg-[#212121] hover:bg-[#2a2a2a]"
+                  ? "border-accent bg-accent/15"
+                  : "border-line bg-panel hover:bg-panel-hover"
               }`}
             >
               <span>
-                <span className="block text-sm font-semibold text-[#ECEFF1]">Dividir no balancete entre os sócios</span>
-                <span className="mt-0.5 block text-xs text-[#78909C]">
+                <span className="block text-sm font-semibold text-foreground">Dividir no balancete entre os sócios</span>
+                <span className="mt-0.5 block text-xs text-muted">
                   {dividirBalancete
                     ? "Ligado: lança metade do custo pra Matheus e metade pra Enyo."
                     : "Desligado: lança o custo integral no balancete pra quem estiver registrando."}
                 </span>
               </span>
-              <span className={`relative h-6 w-11 shrink-0 rounded-full transition ${dividirBalancete ? "bg-[#546E7A]" : "bg-[#333333]"}`}>
+              <span className={`relative h-6 w-11 shrink-0 rounded-full transition ${dividirBalancete ? "bg-accent" : "bg-line"}`}>
                 <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${dividirBalancete ? "left-5" : "left-0.5"}`} />
               </span>
             </button>
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
               <p className="text-sm font-semibold">
-                Custo total estimado:{" "}
-                <span className="text-[#90A4AE]">{formatarMoeda(valorTotalGeral)}</span>
+                Custo total da entrada:{" "}
+                <span className="text-steel">{formatarMoeda(valorTotalGeral)}</span>
               </p>
               <button
                 type="button"
                 onClick={handleSalvar}
                 disabled={salvando}
-                className="inline-flex h-11 items-center gap-2 rounded-2xl bg-[#546E7A] px-5 text-sm font-semibold text-white transition hover:bg-[#455A64] disabled:opacity-60"
+                className="inline-flex h-11 items-center gap-2 rounded-lg bg-accent px-5 text-sm font-semibold text-background transition hover:bg-accent-dark disabled:opacity-60"
               >
                 <Save className="h-4 w-4" />
-                {salvando ? "Salvando..." : "Registrar fabricação"}
+                {salvando ? "Salvando..." : "Registrar compra / reposição"}
               </button>
             </div>
           </>
@@ -4817,14 +4704,14 @@ function FabricacaoSubModulo({
       </div>
 
       {/* Histórico */}
-      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
-        <p className="text-sm font-semibold text-[#90A4AE]">Histórico de fabricação</p>
-        <p className="mt-0.5 text-xs text-[#78909C]">Clique em um pedido para ver os itens usados e editar.</p>
-        <div className="mt-4 overflow-hidden rounded-3xl border border-[#333333]">
+      <div className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
+        <p className="text-sm font-semibold text-steel">Histórico de compras e entradas</p>
+        <p className="mt-0.5 text-xs text-muted">Clique em um pedido para ver os itens usados e editar.</p>
+        <div className="mt-4 overflow-hidden rounded-xl border border-line">
           {pedidos.length > 0 ? (
             <div className="max-h-72 overflow-auto">
-              <table className="min-w-[560px] w-full bg-[#212121] text-left text-sm">
-                <thead className="sticky top-0 bg-[#181818] text-[#90A4AE]">
+              <table className="min-w-[560px] w-full bg-panel text-left text-sm">
+                <thead className="sticky top-0 bg-surface text-steel">
                   <tr>
                     <Th>Data</Th>
                     <Th>Produto</Th>
@@ -4839,7 +4726,7 @@ function FabricacaoSubModulo({
                     <tr
                       key={p.id}
                       onClick={() => abrirDetalhePedido(p)}
-                      className="cursor-pointer border-t border-[#2a2a2a] transition hover:bg-[#2a2a2a]"
+                      className="cursor-pointer border-t border-panel-hover transition hover:bg-panel-hover"
                     >
                       <Td>{formatarData(p.data)}</Td>
                       <Td className="font-semibold">{p.produtoNome}</Td>
@@ -4848,18 +4735,18 @@ function FabricacaoSubModulo({
                         {p.qtdFabricada > 0 ? (
                           `${formatarMoeda(p.valorTotal / p.qtdFabricada)}/un`
                         ) : (
-                          <span className="text-[#78909C]">—</span>
+                          <span className="text-muted">—</span>
                         )}
                       </Td>
-                      <Td className="font-semibold text-[#90A4AE]">{formatarMoeda(p.valorTotal)}</Td>
-                      <Td className="text-xs text-[#78909C]">{nomeUsuario(usuariosMap, p.criadoPor)}</Td>
+                      <Td className="font-semibold text-steel">{formatarMoeda(p.valorTotal)}</Td>
+                      <Td className="text-xs text-muted">{nomeUsuario(usuariosMap, p.criadoPor)}</Td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           ) : (
-            <EstadoTabelaVazia texto="Nenhum pedido de fabricação registrado." />
+            <EstadoTabelaVazia texto="Nenhuma compra / reposição registrada." />
           )}
         </div>
       </div>
@@ -4867,7 +4754,7 @@ function FabricacaoSubModulo({
       {pedidoSelecionado && (
         <Modal
           titulo={editandoDetalhe ? "Editar pedido de fabricação" : pedidoSelecionado.produtoNome || "Detalhe da fabricação"}
-          subtitulo="Fabricação"
+          subtitulo="Compra / reposição"
           onClose={fecharDetalhePedido}
           largo
         >
@@ -4878,30 +4765,30 @@ function FabricacaoSubModulo({
               <div className="sm:col-span-2">
                 <CampoCadastro label="Observação" value={formDetalhe.observacao} onChange={(v) => setFormDetalhe((f) => ({ ...f, observacao: v }))} />
               </div>
-              <p className="sm:col-span-2 text-xs text-[#78909C]">
+              <p className="sm:col-span-2 text-xs text-muted">
                 Produto, quantidade fabricada e peça de cada item não podem ser editados aqui — eles afetam o estoque. Para corrigir isso, exclua este pedido e registre novamente. Preço e fornecedor de cada item podem ser corrigidos abaixo, sem mexer no estoque.
               </p>
 
               {itensDetalhe.length > 0 && (
                 <div className="sm:col-span-2">
-                  <p className="mb-2 text-sm font-semibold text-[#90A4AE]">Corrigir preço e fornecedor dos itens usados</p>
-                  <div className="overflow-x-auto rounded-2xl border border-[#2a2a2a]">
+                  <p className="mb-2 text-sm font-semibold text-steel">Corrigir preço e fornecedor dos itens usados</p>
+                  <div className="overflow-x-auto rounded-lg border border-panel-hover">
                     <table className="min-w-[560px] w-full text-left text-xs">
-                      <thead className="bg-[#181818] text-[#90A4AE]">
+                      <thead className="bg-surface text-steel">
                         <tr><Th>Peça</Th><Th>Qtd total</Th><Th>Fornecedor</Th><Th>Preço unit.</Th><Th>Preço total</Th></tr>
                       </thead>
                       <tbody>
                         {itensDetalhe.map((item) => {
                           const precoUnitario = parseNumero(itensPrecoForm[item.id] ?? "0");
                           return (
-                            <tr key={item.id} className="border-t border-[#2a2a2a]">
+                            <tr key={item.id} className="border-t border-panel-hover">
                               <Td className="font-semibold">{item.nomePeca}</Td>
                               <Td>{item.qtdTotal}</Td>
                               <Td>
                                 <select
                                   value={itensFornecedorForm[item.id] ?? ""}
                                   onChange={(e) => setItensFornecedorForm((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                                  className="h-8 w-36 rounded-lg border border-[#333333] bg-[#141414] px-2 text-xs text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+                                  className="h-8 w-36 rounded-lg border border-line bg-background px-2 text-xs text-foreground outline-none focus:border-accent"
                                 >
                                   <option value="">—</option>
                                   {fornecedores.map((f) => (
@@ -4914,7 +4801,7 @@ function FabricacaoSubModulo({
                                   type="text"
                                   value={itensPrecoForm[item.id] ?? ""}
                                   onChange={(e) => setItensPrecoForm((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                                  className="h-8 w-24 rounded-lg border border-[#333333] bg-[#141414] px-2 text-xs text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+                                  className="h-8 w-24 rounded-lg border border-line bg-background px-2 text-xs text-foreground outline-none focus:border-accent"
                                 />
                               </Td>
                               <Td>{formatarMoeda(item.qtdTotal * precoUnitario)}</Td>
@@ -4931,22 +4818,22 @@ function FabricacaoSubModulo({
             <div>
               <LinhaDetalhe label="Produto" valor={pedidoSelecionado.produtoNome} />
               <LinhaDetalhe label="Data" valor={formatarData(pedidoSelecionado.data)} />
-              <LinhaDetalhe label="Quantidade fabricada" valor={pedidoSelecionado.qtdFabricada} />
+              <LinhaDetalhe label="Quantidade recebida" valor={pedidoSelecionado.qtdFabricada} />
               <LinhaDetalhe label="Custo total" valor={formatarMoeda(pedidoSelecionado.valorTotal)} destaque />
               {pedidoSelecionado.observacao && <LinhaDetalhe label="Observação" valor={pedidoSelecionado.observacao} />}
 
-              <p className="mb-2 mt-5 text-sm font-semibold text-[#90A4AE]">Itens usados</p>
+              <p className="mb-2 mt-5 text-sm font-semibold text-steel">Itens usados</p>
               {carregandoItensDetalhe ? (
-                <p className="py-3 text-xs text-[#78909C]">Carregando itens...</p>
+                <p className="py-3 text-xs text-muted">Carregando itens...</p>
               ) : itensDetalhe.length > 0 ? (
-                <div className="overflow-auto rounded-xl border border-[#2a2a2a]">
+                <div className="overflow-auto rounded-xl border border-panel-hover">
                   <table className="min-w-[480px] w-full text-left text-xs">
-                    <thead className="bg-[#181818] text-[#90A4AE]">
+                    <thead className="bg-surface text-steel">
                       <tr><Th>Peça</Th><Th>Qtd total</Th><Th>Fornecedor</Th><Th>Preço total</Th></tr>
                     </thead>
                     <tbody>
                       {itensDetalhe.map((it) => (
-                        <tr key={it.id} className="border-t border-[#2a2a2a]">
+                        <tr key={it.id} className="border-t border-panel-hover">
                           <Td className="font-semibold">{it.nomePeca}</Td>
                           <Td>{it.qtdTotal}</Td>
                           <Td>{it.fornecedorNome || "—"}</Td>
@@ -4957,18 +4844,18 @@ function FabricacaoSubModulo({
                   </table>
                 </div>
               ) : (
-                <p className="py-3 text-xs text-[#78909C]">Nenhum item registrado para este pedido.</p>
+                <p className="py-3 text-xs text-muted">Nenhum item registrado para este pedido.</p>
               )}
             </div>
           )}
-          <ModalAcoes
+          {pedidoSelecionado.integradoCmv ? <p className="mt-4 text-sm text-muted">Compra recebida integrada ao CMV. Alterações de custo ou estorno exigem conciliação; não são feitos por edição direta.</p> : <ModalAcoes
             editando={editandoDetalhe}
             salvando={salvandoDetalhe}
             onEditar={() => setEditandoDetalhe(true)}
             onSalvar={handleSalvarDetalhePedido}
             onCancelar={() => setEditandoDetalhe(false)}
             onExcluir={handleExcluirDetalhePedido}
-          />
+          />}
         </Modal>
       )}
     </div>
@@ -5137,8 +5024,8 @@ function BalanceteModulo({ usuarioId, dataHoje }: { usuarioId: string; dataHoje:
   return (
     <section className="space-y-6">
       {/* Formulário */}
-      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
-        <SectionHeader tag="Balancete" titulo="Registrar item" descricao="Adicione despesas e compras de cada sócio para calcular o balancete." />
+      <div className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
+        <SectionHeader tag="Balancete" titulo="Registrar item" descricao="Rateio de gastos entre sócios. Este controle não é um balancete contábil nem comprova capital social ou dívida da empresa." />
         <form onSubmit={handleSalvar} className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <CampoCadastro label="Data *" type="date" value={form.data} onChange={(v) => setForm((f) => ({ ...f, data: v }))} required />
           <div className="xl:col-span-2">
@@ -5154,15 +5041,15 @@ function BalanceteModulo({ usuarioId, dataHoje }: { usuarioId: string; dataHoje:
             placeholder="Selecione..."
           />
           <div className="flex items-end">
-            <div className="flex-1 rounded-2xl border border-[#333333] bg-[#181818] px-4 py-3 text-sm">
-              <p className="text-xs text-[#78909C]">Valor total</p>
-              <p className="font-bold text-[#90A4AE]">{formatarMoeda(valorTotalForm)}</p>
+            <div className="flex-1 rounded-lg border border-line bg-surface px-4 py-3 text-sm">
+              <p className="text-xs text-muted">Valor total</p>
+              <p className="font-bold text-steel">{formatarMoeda(valorTotalForm)}</p>
             </div>
           </div>
           <div className="sm:col-span-2 xl:col-span-3">
             <FeedbackBloco mensagem={mensagem} erro={erro} />
             <button type="submit" disabled={salvando}
-              className="mt-2 inline-flex h-11 items-center gap-2 rounded-2xl bg-[#546E7A] px-5 text-sm font-semibold text-white transition hover:bg-[#455A64] disabled:opacity-60">
+              className="mt-2 inline-flex h-11 items-center gap-2 rounded-lg bg-accent px-5 text-sm font-semibold text-background transition hover:bg-accent-dark disabled:opacity-60">
               <Plus className="h-4 w-4" />
               {salvando ? "Salvando..." : "Adicionar item"}
             </button>
@@ -5182,21 +5069,21 @@ function BalanceteModulo({ usuarioId, dataHoje }: { usuarioId: string; dataHoje:
       </div>
 
       {/* Tabela */}
-      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
+      <div className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-lg font-bold">Itens registrados</h3>
           <div className="relative w-full sm:w-60">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#90A4AE]" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-steel" />
             <input type="search" value={termoBusca} onChange={(e) => setTermoBusca(e.target.value)}
-              className="h-10 w-full rounded-2xl border border-[#333333] bg-[#141414] pl-9 pr-4 text-sm text-[#ECEFF1] outline-none placeholder:text-[#546E7A] focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+              className="h-10 w-full rounded-lg border border-line bg-background pl-9 pr-4 text-sm text-foreground outline-none placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent-dark"
               placeholder="Buscar item ou comprador" />
           </div>
         </div>
-        <div className="overflow-hidden rounded-3xl border border-[#333333]">
+        <div className="overflow-hidden rounded-xl border border-line">
           {itensFiltrados.length > 0 ? (
             <div className="overflow-auto">
-              <table className="min-w-[720px] w-full bg-[#212121] text-left text-sm">
-                <thead className="sticky top-0 bg-[#181818] text-[#90A4AE]">
+              <table className="min-w-[720px] w-full bg-panel text-left text-sm">
+                <thead className="sticky top-0 bg-surface text-steel">
                   <tr>
                     <Th>Data</Th>
                     <Th>Nome do item</Th>
@@ -5212,18 +5099,18 @@ function BalanceteModulo({ usuarioId, dataHoje }: { usuarioId: string; dataHoje:
                     <tr
                       key={item.id}
                       onClick={() => abrirDetalhe(item)}
-                      className="cursor-pointer border-t border-[#2a2a2a] transition hover:bg-[#2a2a2a]"
+                      className="cursor-pointer border-t border-panel-hover transition hover:bg-panel-hover"
                     >
                       <Td>{formatarData(item.data)}</Td>
                       <Td>{item.nomeItem}</Td>
                       <Td>{formatarMoeda(item.valorUnitario)}</Td>
                       <Td>{item.quantidade}</Td>
-                      <Td className="font-semibold text-[#90A4AE]">{formatarMoeda(item.valorTotal)}</Td>
+                      <Td className="font-semibold text-steel">{formatarMoeda(item.valorTotal)}</Td>
                       <Td>
                         <span className={`rounded-full px-3 py-0.5 text-xs font-semibold ${
                           item.nomeComprador === "Matheus"
-                            ? "bg-[#CFD8DC] text-[#546E7A]"
-                            : "bg-[#37474F]/10 text-[#37474F]"
+                            ? "bg-steel text-muted"
+                            : "bg-accent-dark/10 text-muted"
                         }`}>
                           {item.nomeComprador}
                         </span>
@@ -5237,10 +5124,10 @@ function BalanceteModulo({ usuarioId, dataHoje }: { usuarioId: string; dataHoje:
                     </tr>
                   ))}
                 </tbody>
-                <tfoot className="border-t-2 border-[#333333] bg-[#181818]">
+                <tfoot className="border-t-2 border-line bg-surface">
                   <tr>
-                    <Td colSpan={4} className="font-bold text-[#90A4AE]">Total geral</Td>
-                    <Td className="font-bold text-[#90A4AE]">{formatarMoeda(itens.reduce((s, i) => s + i.valorTotal, 0))}</Td>
+                    <Td colSpan={4} className="font-bold text-steel">Total geral</Td>
+                    <Td className="font-bold text-steel">{formatarMoeda(itens.reduce((s, i) => s + i.valorTotal, 0))}</Td>
                     <Td colSpan={2}>{""}</Td>
                   </tr>
                 </tfoot>
@@ -5274,9 +5161,9 @@ function BalanceteModulo({ usuarioId, dataHoje }: { usuarioId: string; dataHoje:
                 options={COMPRADORES_BALANCETE}
                 placeholder="Selecione..."
               />
-              <div className="rounded-2xl border border-[#333333] bg-[#181818] px-4 py-3 text-sm">
-                <p className="text-xs text-[#78909C]">Valor total</p>
-                <p className="font-bold text-[#90A4AE]">{formatarMoeda(valorTotalFormDetalhe)}</p>
+              <div className="rounded-lg border border-line bg-surface px-4 py-3 text-sm">
+                <p className="text-xs text-muted">Valor total</p>
+                <p className="font-bold text-steel">{formatarMoeda(valorTotalFormDetalhe)}</p>
               </div>
             </div>
           ) : (
@@ -5363,7 +5250,7 @@ function UsuariosModulo({ usuarioId }: { usuarioId: string }) {
     <section className="space-y-6">
       <FeedbackBloco mensagem={mensagem} erro={erro} />
 
-      <div className="rounded-3xl border border-amber-800/40 bg-[#212121] p-4 sm:p-6 shadow-sm">
+      <div className="rounded-xl border border-amber-800/40 bg-panel p-4 sm:p-6 shadow-sm">
         <SectionHeader
           tag="Pendentes"
           titulo="Aguardando aprovação"
@@ -5371,11 +5258,11 @@ function UsuariosModulo({ usuarioId }: { usuarioId: string }) {
         />
         <div className="mt-5">
           {pendentes.length === 0 ? (
-            <p className="text-sm text-[#78909C]">Nenhum usuário aguardando aprovação.</p>
+            <p className="text-sm text-muted">Nenhum usuário aguardando aprovação.</p>
           ) : (
-            <div className="overflow-hidden rounded-3xl border border-amber-800/40">
-              <table className="w-full bg-[#212121] text-left text-sm">
-                <thead className="bg-amber-900/20 text-[#ECEFF1]">
+            <div className="overflow-hidden rounded-xl border border-amber-800/40">
+              <table className="w-full bg-panel text-left text-sm">
+                <thead className="bg-amber-900/20 text-foreground">
                   <tr>
                     <Th>Nome</Th>
                     <Th>E-mail</Th>
@@ -5393,7 +5280,7 @@ function UsuariosModulo({ usuarioId }: { usuarioId: string }) {
                             type="button"
                             onClick={() => handleAprovar(m.id)}
                             disabled={salvando}
-                            className="inline-flex h-8 items-center gap-1 rounded-xl bg-[#546E7A] px-3 text-xs font-semibold text-white transition hover:bg-[#455A64] disabled:opacity-60"
+                            className="inline-flex h-8 items-center gap-1 rounded-xl bg-accent px-3 text-xs font-semibold text-background transition hover:bg-accent-dark disabled:opacity-60"
                           >
                             <UserCheck className="h-3.5 w-3.5" />
                             Aprovar
@@ -5417,18 +5304,18 @@ function UsuariosModulo({ usuarioId }: { usuarioId: string }) {
         </div>
       </div>
 
-      <div className="rounded-3xl border border-[#333333] bg-[#212121] p-4 sm:p-6 shadow-sm">
+      <div className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
         <SectionHeader
           tag="Acessos"
           titulo="Usuários com acesso"
           descricao="Administradores e sócios com acesso liberado ao sistema."
         />
-        <div className="mt-5 overflow-hidden rounded-3xl border border-[#333333]">
+        <div className="mt-5 overflow-hidden rounded-xl border border-line">
           {comAcesso.length === 0 ? (
             <EstadoTabelaVazia texto="Nenhum usuário com acesso." />
           ) : (
-            <table className="w-full bg-[#212121] text-left text-sm">
-              <thead className="bg-[#181818] text-[#90A4AE]">
+            <table className="w-full bg-panel text-left text-sm">
+              <thead className="bg-surface text-steel">
                 <tr>
                   <Th>Nome</Th>
                   <Th>E-mail</Th>
@@ -5438,13 +5325,13 @@ function UsuariosModulo({ usuarioId }: { usuarioId: string }) {
               </thead>
               <tbody>
                 {comAcesso.map((m) => (
-                  <tr key={m.id} className="border-t border-[#2a2a2a]">
+                  <tr key={m.id} className="border-t border-panel-hover">
                     <Td className="font-semibold">{m.nome || "-"}</Td>
                     <Td>{m.email || "-"}</Td>
                     <Td>
                       <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
                         m.papel === "admin"
-                          ? "bg-[#CFD8DC] text-[#546E7A]"
+                          ? "bg-steel text-muted"
                           : "bg-emerald-900/20 text-emerald-400"
                       }`}>
                         {m.papel === "admin" ? "Admin" : "Sócio"}
@@ -5478,11 +5365,11 @@ function UsuariosModulo({ usuarioId }: { usuarioId: string }) {
 function DashSecao({ titulo }: { titulo: string }) {
   return (
     <div className="flex items-center gap-4">
-      <div className="h-px flex-1 bg-[#CFD8DC]" />
-      <span className="text-xs font-bold uppercase tracking-widest text-[#78909C]">
+      <div className="h-px flex-1 bg-steel" />
+      <span className="text-xs font-bold uppercase tracking-widest text-muted">
         {titulo}
       </span>
-      <div className="h-px flex-1 bg-[#CFD8DC]" />
+      <div className="h-px flex-1 bg-steel" />
     </div>
   );
 }
@@ -5500,24 +5387,24 @@ function KpiCard({
 }) {
   return (
     <div
-      className={`rounded-3xl border p-4 ${
+      className={`rounded-xl border p-4 ${
         destaque
-          ? "border-[#37474F] bg-[#1B2535]"
+          ? "border-accent-dark bg-[#1B2535]"
           : alerta
           ? "border-red-900/50 bg-[#2B1010]"
-          : "border-[#333333] bg-[#1e1e1e]"
+          : "border-line bg-background"
       }`}
     >
-      <p className="text-xs font-semibold uppercase tracking-wide text-[#78909C]">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted">
         {titulo}
       </p>
       <p
         className={`mt-1.5 text-base sm:text-xl font-bold truncate ${
           destaque
-            ? "text-[#90A4AE]"
+            ? "text-steel"
             : alerta
             ? "text-red-400"
-            : "text-[#ECEFF1]"
+            : "text-foreground"
         }`}
       >
         {valor}
@@ -5537,10 +5424,10 @@ function SectionHeader({
 }) {
   return (
     <div>
-      <p className="text-sm font-semibold text-[#90A4AE]">{tag}</p>
+      <p className="text-sm font-semibold text-steel">{tag}</p>
       <h2 className="mt-1 text-2xl font-bold">{titulo}</h2>
       {descricao && (
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-[#78909C]">
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
           {descricao}
         </p>
       )}
@@ -5572,7 +5459,7 @@ function CampoCadastro({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         required={required}
-        className="w-full rounded-2xl border border-[#333333] bg-[#141414] px-4 py-3 text-sm text-[#ECEFF1] outline-none transition placeholder:text-[#546E7A] focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+        className="w-full rounded-lg border border-line bg-background px-4 py-3 text-sm text-foreground outline-none transition placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent-dark"
       />
     </div>
   );
@@ -5597,7 +5484,7 @@ function SelectCadastro({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-2xl border border-[#333333] bg-[#141414] px-4 py-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+        className="w-full rounded-lg border border-line bg-background px-4 py-3 text-sm text-foreground outline-none focus:border-accent focus:ring-2 focus:ring-accent-dark"
       >
         {placeholder && <option value="">{placeholder}</option>}
         {options.map((o) => (
@@ -5634,7 +5521,7 @@ function Td({
 
 function EstadoTabelaVazia({ texto }: { texto: string }) {
   return (
-    <div className="bg-[#212121] px-4 py-12 text-center text-sm text-[#78909C]">
+    <div className="bg-panel px-4 py-12 text-center text-sm text-muted">
       {texto}
     </div>
   );
@@ -5642,7 +5529,7 @@ function EstadoTabelaVazia({ texto }: { texto: string }) {
 
 function EstadoCarregando({ texto }: { texto: string }) {
   return (
-    <div className="rounded-3xl border border-[#333333] bg-[#212121] p-12 text-center text-sm text-[#78909C]">
+    <div className="rounded-xl border border-line bg-panel p-12 text-center text-sm text-muted">
       {texto}
     </div>
   );
@@ -5695,18 +5582,18 @@ function ItensPedidoEditor({
         <button
           type="button"
           onClick={adicionar}
-          className="inline-flex h-8 items-center gap-1 rounded-xl border border-[#333333] bg-[#212121] px-2 text-xs font-semibold text-[#546E7A] hover:bg-[#2a2a2a]"
+          className="inline-flex h-8 items-center gap-1 rounded-xl border border-line bg-panel px-2 text-xs font-semibold text-muted hover:bg-panel-hover"
         >
           <Plus className="h-3.5 w-3.5" /> Adicionar item
         </button>
       </div>
       {itens.map((item) => (
-        <div key={item.id} className="mt-2 rounded-xl border border-[#333333] bg-[#141414] p-2">
+        <div key={item.id} className="mt-2 rounded-xl border border-line bg-background p-2">
           <div className="flex flex-wrap gap-2">
             <select
               value={item.materiaPrimaId}
               onChange={(e) => selecionarMateriaPrima(item.id, e.target.value)}
-              className="h-9 min-w-[180px] flex-1 rounded-xl border border-[#333333] bg-[#181818] px-2 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+              className="h-9 min-w-[180px] flex-1 rounded-xl border border-line bg-surface px-2 text-sm text-foreground outline-none focus:border-accent"
             >
               <option value="">Item avulso (digitar descrição)</option>
               {materiasPrimas.map((mp) => (
@@ -5721,7 +5608,7 @@ function ItensPedidoEditor({
                 value={item.descricao}
                 onChange={(e) => atualizar(item.id, "descricao", e.target.value)}
                 placeholder="Descrição"
-                className="h-9 min-w-[160px] flex-1 rounded-xl border border-[#333333] bg-[#181818] px-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+                className="h-9 min-w-[160px] flex-1 rounded-xl border border-line bg-surface px-3 text-sm text-foreground outline-none focus:border-accent"
               />
             )}
             <input
@@ -5729,14 +5616,14 @@ function ItensPedidoEditor({
               value={item.quantidade}
               onChange={(e) => atualizar(item.id, "quantidade", e.target.value)}
               placeholder="Qtd"
-              className="h-9 w-16 rounded-xl border border-[#333333] bg-[#181818] px-2 text-center text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+              className="h-9 w-16 rounded-xl border border-line bg-surface px-2 text-center text-sm text-foreground outline-none focus:border-accent"
             />
             <input
               type="text"
               value={item.valorUnitario}
               onChange={(e) => atualizar(item.id, "valorUnitario", e.target.value)}
               placeholder="R$ un."
-              className="h-9 w-24 rounded-xl border border-[#333333] bg-[#181818] px-2 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+              className="h-9 w-24 rounded-xl border border-line bg-surface px-2 text-sm text-foreground outline-none focus:border-accent"
             />
             <button
               type="button"
@@ -5747,14 +5634,14 @@ function ItensPedidoEditor({
             </button>
           </div>
           {item.materiaPrimaId && (
-            <p className="mt-1.5 text-xs text-[#78909C]">
+            <p className="mt-1.5 text-xs text-muted">
               {item.descricao} — valor unitário puxado do cadastro, editável se o preço dessa compra for diferente.
             </p>
           )}
         </div>
       ))}
       {itens.length > 0 && (
-        <p className="mt-2 text-right text-sm font-semibold text-[#90A4AE]">
+        <p className="mt-2 text-right text-sm font-semibold text-steel">
           Soma dos itens: {formatarMoeda(somaItensPedido(itens))}
         </p>
       )}
@@ -5775,12 +5662,12 @@ function FeedbackBloco({
   return (
     <div className={className ?? "mt-4"}>
       {mensagem && (
-        <div className="rounded-2xl border border-[#333333] bg-[#CFD8DC] px-4 py-3 text-sm text-[#546E7A]">
+        <div className="rounded-lg border border-line bg-steel px-4 py-3 text-sm text-muted">
           {mensagem}
         </div>
       )}
       {erro && (
-        <div className="rounded-2xl border border-red-900/50 bg-red-900/15 px-4 py-3 text-sm text-red-400">
+        <div className="rounded-lg border border-red-900/50 bg-red-900/15 px-4 py-3 text-sm text-red-400">
           {erro}
         </div>
       )}
@@ -5793,7 +5680,7 @@ function MarketplaceBadge({ marketplace }: { marketplace: Marketplace }) {
     "Mercado Livre": "bg-yellow-900/30 text-yellow-400",
     Shopee: "bg-orange-900/30 text-orange-400",
     "Site Próprio": "bg-blue-900/30 text-blue-400",
-    Outro: "bg-[#2a2a2a] text-[#90A4AE]",
+    Outro: "bg-panel-hover text-steel",
   };
   return (
     <span
@@ -5832,17 +5719,17 @@ function Modal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className={`w-full ${largo ? "max-w-2xl" : "max-w-lg"} max-h-[90vh] overflow-y-auto rounded-3xl border border-[#333333] bg-[#212121] p-6 shadow-xl`}
+        className={`w-full ${largo ? "max-w-2xl" : "max-w-lg"} max-h-[90vh] overflow-y-auto rounded-xl border border-line bg-panel p-6 shadow-xl`}
       >
         <div className="flex items-start justify-between gap-4">
           <div>
-            {subtitulo && <p className="text-sm font-semibold text-[#90A4AE]">{subtitulo}</p>}
+            {subtitulo && <p className="text-sm font-semibold text-steel">{subtitulo}</p>}
             <h3 className="mt-1 text-xl font-bold">{titulo}</h3>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#333333] bg-[#181818] text-[#90A4AE] transition hover:bg-[#2a2a2a]"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-steel transition hover:bg-panel-hover"
           >
             <X className="h-4 w-4" />
           </button>
@@ -5865,9 +5752,9 @@ function LinhaDetalhe({
   alerta?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-[#2a2a2a] py-2.5 text-sm last:border-0">
-      <span className="text-[#90A4AE]">{label}</span>
-      <span className={`text-right font-semibold ${alerta ? "text-red-400" : destaque ? "text-[#90A4AE]" : "text-[#ECEFF1]"}`}>
+    <div className="flex items-center justify-between gap-4 border-b border-panel-hover py-2.5 text-sm last:border-0">
+      <span className="text-steel">{label}</span>
+      <span className={`text-right font-semibold ${alerta ? "text-red-400" : destaque ? "text-steel" : "text-foreground"}`}>
         {valor}
       </span>
     </div>
@@ -5889,16 +5776,16 @@ function HistoricoRegistro({
 }) {
   if (!criadoPor && !atualizadoPor) return null;
   return (
-    <div className="mt-3 border-t border-[#2a2a2a] pt-3 text-xs text-[#78909C]">
+    <div className="mt-3 border-t border-panel-hover pt-3 text-xs text-muted">
       {criadoPor && (
         <p>
-          Lançado por <span className="font-semibold text-[#90A4AE]">{nomeUsuario(usuariosMap, criadoPor)}</span>
+          Lançado por <span className="font-semibold text-steel">{nomeUsuario(usuariosMap, criadoPor)}</span>
           {criadoEm && ` em ${formatarDataHora(criadoEm)}`}
         </p>
       )}
       {atualizadoPor && (
         <p className="mt-1">
-          Última edição por <span className="font-semibold text-[#90A4AE]">{nomeUsuario(usuariosMap, atualizadoPor)}</span>
+          Última edição por <span className="font-semibold text-steel">{nomeUsuario(usuariosMap, atualizadoPor)}</span>
           {atualizadoEm && ` em ${formatarDataHora(atualizadoEm)}`}
         </p>
       )}
@@ -5922,14 +5809,14 @@ function ModalAcoes({
   onExcluir: () => void;
 }) {
   return (
-    <div className="mt-6 flex flex-wrap gap-3 border-t border-[#2a2a2a] pt-5">
+    <div className="mt-6 flex flex-wrap gap-3 border-t border-panel-hover pt-5">
       {editando ? (
         <>
           <button
             type="button"
             onClick={onSalvar}
             disabled={salvando}
-            className="inline-flex h-11 items-center gap-2 rounded-2xl bg-[#546E7A] px-4 text-sm font-semibold text-white transition hover:bg-[#455A64] disabled:opacity-60"
+            className="inline-flex h-11 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-semibold text-background transition hover:bg-accent-dark disabled:opacity-60"
           >
             <Save className="h-4 w-4" />
             {salvando ? "Salvando..." : "Salvar alterações"}
@@ -5937,7 +5824,7 @@ function ModalAcoes({
           <button
             type="button"
             onClick={onCancelar}
-            className="inline-flex h-11 items-center gap-2 rounded-2xl border border-[#333333] bg-[#181818] px-4 text-sm font-semibold text-[#546E7A] transition hover:bg-[#2a2a2a]"
+            className="inline-flex h-11 items-center gap-2 rounded-lg border border-line bg-surface px-4 text-sm font-semibold text-muted transition hover:bg-panel-hover"
           >
             <X className="h-4 w-4" /> Cancelar
           </button>
@@ -5947,14 +5834,14 @@ function ModalAcoes({
           <button
             type="button"
             onClick={onEditar}
-            className="inline-flex h-11 items-center gap-2 rounded-2xl bg-[#546E7A] px-4 text-sm font-semibold text-white transition hover:bg-[#455A64]"
+            className="inline-flex h-11 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-semibold text-background transition hover:bg-accent-dark"
           >
             <Pencil className="h-4 w-4" /> Editar
           </button>
           <button
             type="button"
             onClick={onExcluir}
-            className="inline-flex h-11 items-center gap-2 rounded-2xl border border-red-900/50 bg-red-900/10 px-4 text-sm font-semibold text-red-400 transition hover:bg-red-900/30"
+            className="inline-flex h-11 items-center gap-2 rounded-lg border border-red-900/50 bg-red-900/10 px-4 text-sm font-semibold text-red-400 transition hover:bg-red-900/30"
           >
             <Trash2 className="h-4 w-4" /> Excluir
           </button>
@@ -6016,6 +5903,7 @@ function mapKit(r: any): Kit {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapPedidoFabricacao(r: any): PedidoFabricacao {
   return {
+    integradoCmv: Boolean(r.compra_payload),
     id: String(r.id),
     produtoId: String(r.produto_id ?? ""),
     produtoNome: String(r.produto_nome ?? ""),
@@ -6046,10 +5934,13 @@ function mapProduto(r: any): Produto {
     nome: String(r.nome ?? ""),
     categoria: String(r.categoria ?? ""),
     custo: Number(r.custo ?? 0),
+    custoMedio: r.custo_medio == null ? null : Number(r.custo_medio),
+    custoMedioEstimado: r.custo_medio_estimado !== false,
     precoVenda: Number(r.preco_venda ?? 0),
     estoqueAtual: Number(r.estoque_atual ?? 0),
     estoqueMinimo: Number(r.estoque_minimo ?? 0),
     ativo: Boolean(r.ativo ?? true),
+    publicarSite: Boolean(r.publicar_site ?? false),
   };
 }
 
@@ -6057,6 +5948,10 @@ function mapProduto(r: any): Produto {
 function mapVenda(r: any): Venda {
   return {
     id: String(r.id),
+    cmvTotal: r.cmv_total == null ? null : Number(r.cmv_total),
+    cmvEstimado: r.cmv_estimado !== false,
+    cmvComponentes: r.cmv_componentes ?? null,
+    cmvRegistradoEm: String(r.cmv_registrado_em ?? ""),
     data: String(r.data ?? ""),
     marketplace: String(r.marketplace ?? "Outro") as Marketplace,
     produtoId: String(r.produto_id ?? ""),
@@ -6213,14 +6108,14 @@ function calcularCustoUnitPorPedido(
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function obterUltimosMeses(n: number) {
+function obterUltimosMeses(n: number, dataHoje: string) {
   const meses = [];
-  const hoje = new Date();
+  const hoje = new Date(`${dataHoje}T12:00:00Z`);
   for (let i = n - 1; i >= 0; i--) {
-    const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
+    const d = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth() - i, 1));
     meses.push({
       prefixo: d.toISOString().slice(0, 7),
-      label: d.toLocaleDateString("pt-BR", { month: "short" }),
+      label: d.toLocaleDateString("pt-BR", { month: "short", timeZone: "UTC" }),
     });
   }
   return meses;

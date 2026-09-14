@@ -155,14 +155,14 @@ export default function PerfisCalculadora({
       <FeedbackBloco mensagem={mensagem} erro={erro} />
 
       <Cartao>
-        <div className="mb-4 flex gap-2 rounded-2xl border border-[#333333] bg-[#181818] p-1.5 self-start">
+        <div className="mb-4 flex gap-2 rounded-lg border border-line bg-surface p-1.5 self-start">
           {(["catalogo", "personalizado"] as const).map((m) => (
             <button
               key={m}
               type="button"
               onClick={() => setModo(m)}
               className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
-                modo === m ? "bg-[#546E7A] text-white" : "text-[#90A4AE] hover:bg-[#2a2a2a]"
+                modo === m ? "bg-accent text-background" : "text-steel hover:bg-panel-hover"
               }`}
             >
               {m === "catalogo" ? "Do catálogo" : "Personalizado"}
@@ -185,7 +185,7 @@ export default function PerfisCalculadora({
             <Campo label="Espessura da parede (mm)" value={espessuraParede} onChange={setEspessuraParede} />
             <SelectCampo label="Material" value={material} onChange={(v) => setMaterial(v as Material)} options={MATERIAIS.map((m) => ({ valor: m.valor, label: m.label }))} />
             <label className="flex items-center gap-2 self-end pb-2.5 text-sm">
-              <input type="checkbox" checked={salvarNoCatalogo} onChange={(e) => setSalvarNoCatalogo(e.target.checked)} className="h-4 w-4 accent-[#546E7A]" />
+              <input type="checkbox" checked={salvarNoCatalogo} onChange={(e) => setSalvarNoCatalogo(e.target.checked)} className="h-4 w-4 accent-accent" />
               Salvar como favorito no catálogo
             </label>
           </div>
@@ -196,11 +196,11 @@ export default function PerfisCalculadora({
           <Campo label="Quantidade" value={quantidade} onChange={setQuantidade} />
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-3 rounded-2xl border border-[#2a2a2a] bg-[#141414] p-3 text-sm sm:grid-cols-4">
-          <div><p className="text-xs text-[#78909C]">Peso/metro</p><p className="font-semibold">{pesoMetro.toFixed(3)}kg/m</p></div>
-          <div><p className="text-xs text-[#78909C]">Custo/metro</p><p className="font-semibold">{custoMetro.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
-          <div><p className="text-xs text-[#78909C]">Custo unitário</p><p className="font-semibold">{(custoMetro * comprimento).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
-          <div><p className="text-xs text-[#78909C]">Total (qtd.)</p><p className="font-semibold">{custoTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
+        <div className="mt-4 grid grid-cols-2 gap-3 rounded-lg border border-panel-hover bg-background p-3 text-sm sm:grid-cols-4">
+          <div><p className="text-xs text-muted">Peso/metro</p><p className="font-semibold">{pesoMetro.toFixed(3)}kg/m</p></div>
+          <div><p className="text-xs text-muted">Custo/metro</p><p className="font-semibold">{custoMetro.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
+          <div><p className="text-xs text-muted">Custo unitário</p><p className="font-semibold">{(custoMetro * comprimento).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
+          <div><p className="text-xs text-muted">Total (qtd.)</p><p className="font-semibold">{custoTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
         </div>
 
         <div className="mt-4">
@@ -212,10 +212,10 @@ export default function PerfisCalculadora({
 
       {lote.length > 0 && (
         <Cartao>
-          <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Lote ({lote.length} item{lote.length === 1 ? "" : "s"})</p>
-          <div className="overflow-x-auto rounded-2xl border border-[#2a2a2a]">
+          <p className="mb-3 text-sm font-semibold text-steel">Lote ({lote.length} item{lote.length === 1 ? "" : "s"})</p>
+          <div className="overflow-x-auto rounded-lg border border-panel-hover">
             <table className="w-full min-w-[680px] text-left text-sm">
-              <thead className="bg-[#181818] text-[#90A4AE]">
+              <thead className="bg-surface text-steel">
                 <tr>
                   <Th>Perfil</Th>
                   <Th>Comprimento</Th>
@@ -227,12 +227,12 @@ export default function PerfisCalculadora({
               </thead>
               <tbody>
                 {lote.map((item) => (
-                  <tr key={item.id} className="border-t border-[#2a2a2a] align-top">
+                  <tr key={item.id} className="border-t border-panel-hover align-top">
                     <Td className="font-semibold">{item.nome}</Td>
                     <Td>{item.comprimentoM}m</Td>
                     <Td>{item.quantidade}</Td>
                     <Td>{(item.custoMetro * parseNumero(item.comprimentoM)).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</Td>
-                    <Td className="font-semibold text-[#90A4AE]">{item.custoTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</Td>
+                    <Td className="font-semibold text-steel">{item.custoTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</Td>
                     <Td>
                       <div className="flex flex-col gap-2">
                         <AdicionarAoOrcamentoBotao
@@ -258,27 +258,27 @@ export default function PerfisCalculadora({
             </table>
           </div>
           <p className="mt-4 text-right text-base font-bold">
-            Total do lote: <span className="text-[#90A4AE]">{totalLote.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
+            Total do lote: <span className="text-steel">{totalLote.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
           </p>
         </Cartao>
       )}
 
       <Cartao>
-        <p className="mb-3 flex items-center gap-2 text-sm font-semibold text-[#90A4AE]">
+        <p className="mb-3 flex items-center gap-2 text-sm font-semibold text-steel">
           <Star className="h-4 w-4" /> Catálogo de perfis
         </p>
-        <div className="overflow-x-auto rounded-2xl border border-[#2a2a2a]">
+        <div className="overflow-x-auto rounded-lg border border-panel-hover">
           <table className="w-full min-w-[520px] text-left text-sm">
-            <thead className="bg-[#181818] text-[#90A4AE]">
+            <thead className="bg-surface text-steel">
               <tr><Th>Nome</Th><Th>Tipo</Th><Th>Material</Th><Th>Favorito</Th></tr>
             </thead>
             <tbody>
               {perfis.map((p) => (
-                <tr key={p.id} className="border-t border-[#2a2a2a]">
+                <tr key={p.id} className="border-t border-panel-hover">
                   <Td className="font-semibold">{p.nome}</Td>
-                  <Td className="text-xs text-[#78909C]">{TIPOS_PERFIL.find((t) => t.valor === p.tipo)?.label}</Td>
-                  <Td className="text-xs text-[#78909C]">{MATERIAIS.find((m) => m.valor === p.material)?.label ?? p.material}</Td>
-                  <Td>{p.favorito ? <Star className="h-4 w-4 fill-[#546E7A] text-[#546E7A]" /> : "-"}</Td>
+                  <Td className="text-xs text-muted">{TIPOS_PERFIL.find((t) => t.valor === p.tipo)?.label}</Td>
+                  <Td className="text-xs text-muted">{MATERIAIS.find((m) => m.valor === p.material)?.label ?? p.material}</Td>
+                  <Td>{p.favorito ? <Star className="h-4 w-4 fill-[#546E7A] text-muted" /> : "-"}</Td>
                 </tr>
               ))}
             </tbody>

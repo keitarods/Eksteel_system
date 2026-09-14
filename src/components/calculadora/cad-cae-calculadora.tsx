@@ -156,9 +156,9 @@ export default function CadCaeCalculadora({
 
       {niveisAtivos.length === 0 && (
         <Cartao>
-          <p className="text-sm text-[#78909C]">
+          <p className="text-sm text-muted">
             Nenhum nível de responsabilidade ativo cadastrado ainda — cadastre pelo menos um na aba
-            <span className="font-semibold text-[#90A4AE]"> Parâmetros</span> antes de calcular.
+            <span className="font-semibold text-steel"> Parâmetros</span> antes de calcular.
           </p>
         </Cartao>
       )}
@@ -180,13 +180,13 @@ export default function CadCaeCalculadora({
           </div>
 
           {nivelSelecionado && (
-            <div className="mt-3 rounded-2xl border border-[#2a2a2a] bg-[#141414] p-3 text-xs text-[#78909C]">
+            <div className="mt-3 rounded-lg border border-panel-hover bg-background p-3 text-xs text-muted">
               {nivelSelecionado.descricao || "Sem descrição cadastrada pra esse nível."}
             </div>
           )}
 
           <label className="mt-3 flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={incluirArt} onChange={(e) => setIncluirArt(e.target.checked)} className="h-4 w-4 accent-[#546E7A]" />
+            <input type="checkbox" checked={incluirArt} onChange={(e) => setIncluirArt(e.target.checked)} className="h-4 w-4 accent-accent" />
             Incluir ART/RRT no orçamento ({(parametros["valor_art_referencia"]?.valor ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })})
           </label>
 
@@ -199,16 +199,16 @@ export default function CadCaeCalculadora({
             />
           </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-3 rounded-2xl border border-[#2a2a2a] bg-[#141414] p-3 text-sm sm:grid-cols-4">
-            <div><p className="text-xs text-[#78909C]">Hora técnica ({nivelSelecionado?.nome ?? "—"})</p><p className="font-semibold">{custoHoraNivel.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/h</p></div>
-            <div><p className="text-xs text-[#78909C]">Horas</p><p className="font-semibold">{previa.custoHoras.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
-            <div><p className="text-xs text-[#78909C]">Revisões extras</p><p className="font-semibold">{previa.custoRevisoes.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
-            <div><p className="text-xs text-[#78909C]">ART</p><p className="font-semibold">{previa.custoArt.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
+          <div className="mt-4 grid grid-cols-2 gap-3 rounded-lg border border-panel-hover bg-background p-3 text-sm sm:grid-cols-4">
+            <div><p className="text-xs text-muted">Hora técnica ({nivelSelecionado?.nome ?? "—"})</p><p className="font-semibold">{custoHoraNivel.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/h</p></div>
+            <div><p className="text-xs text-muted">Horas</p><p className="font-semibold">{previa.custoHoras.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
+            <div><p className="text-xs text-muted">Revisões extras</p><p className="font-semibold">{previa.custoRevisoes.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
+            <div><p className="text-xs text-muted">ART</p><p className="font-semibold">{previa.custoArt.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
           </div>
 
           <p className="mt-3 text-sm">
-            Custo por serviço: <span className="font-semibold text-[#90A4AE]">{previa.custoUnitario.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
-            {" · "}Total do lote deste item: <span className="font-semibold text-[#90A4AE]">{previa.custoTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
+            Custo por serviço: <span className="font-semibold text-steel">{previa.custoUnitario.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
+            {" · "}Total do lote deste item: <span className="font-semibold text-steel">{previa.custoTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
           </p>
 
           <div className="mt-4">
@@ -219,10 +219,10 @@ export default function CadCaeCalculadora({
 
       {lote.length > 0 && (
         <Cartao>
-          <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Lote ({lote.length} item{lote.length === 1 ? "" : "s"})</p>
-          <div className="overflow-x-auto rounded-2xl border border-[#2a2a2a]">
+          <p className="mb-3 text-sm font-semibold text-steel">Lote ({lote.length} item{lote.length === 1 ? "" : "s"})</p>
+          <div className="overflow-x-auto rounded-lg border border-panel-hover">
             <table className="w-full min-w-[760px] text-left text-sm">
-              <thead className="bg-[#181818] text-[#90A4AE]">
+              <thead className="bg-surface text-steel">
                 <tr>
                   <Th>Serviço</Th>
                   <Th>Nível</Th>
@@ -234,19 +234,19 @@ export default function CadCaeCalculadora({
               </thead>
               <tbody>
                 {lote.map((p) => (
-                  <tr key={p.id} className="border-t border-[#2a2a2a] align-top">
+                  <tr key={p.id} className="border-t border-panel-hover align-top">
                     <Td className="font-semibold">{p.nome}</Td>
-                    <Td className="text-xs text-[#78909C]">{p.nivelNome}</Td>
+                    <Td className="text-xs text-muted">{p.nivelNome}</Td>
                     <Td>{p.quantidade}</Td>
                     <Td>{p.custoUnitario.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</Td>
-                    <Td className="font-semibold text-[#90A4AE]">{p.custoTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</Td>
+                    <Td className="font-semibold text-steel">{p.custoTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</Td>
                     <Td>
                       <div className="flex flex-col gap-2">
                         <button
                           type="button"
                           onClick={() => salvarNoHistorico(p)}
                           disabled={salvandoId === p.id}
-                          className="inline-flex h-8 items-center gap-1 rounded-xl border border-[#333333] bg-[#212121] px-2 text-xs font-semibold text-[#546E7A] transition hover:bg-[#2a2a2a]"
+                          className="inline-flex h-8 items-center gap-1 rounded-xl border border-line bg-panel px-2 text-xs font-semibold text-muted transition hover:bg-panel-hover"
                         >
                           <Save className="h-3.5 w-3.5" /> Salvar
                         </button>
@@ -273,7 +273,7 @@ export default function CadCaeCalculadora({
             </table>
           </div>
           <p className="mt-4 text-right text-base font-bold">
-            Total do lote: <span className="text-[#90A4AE]">{totalLote.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
+            Total do lote: <span className="text-steel">{totalLote.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
           </p>
         </Cartao>
       )}

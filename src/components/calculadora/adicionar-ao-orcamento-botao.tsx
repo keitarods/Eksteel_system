@@ -85,7 +85,7 @@ export default function AdicionarAoOrcamentoBotao({
 
   if (sucesso) {
     return (
-      <div className="flex items-center gap-2 rounded-2xl border border-emerald-900/50 bg-emerald-900/10 px-4 py-3 text-sm text-emerald-400">
+      <div className="flex items-center gap-2 rounded-lg border border-emerald-900/50 bg-emerald-900/10 px-4 py-3 text-sm text-emerald-400">
         <CheckCircle2 className="h-4 w-4 shrink-0" />
         Item adicionado.{" "}
         <a href={`/orcamentos/${sucesso}`} target="_blank" rel="noopener noreferrer" className="underline">
@@ -96,15 +96,15 @@ export default function AdicionarAoOrcamentoBotao({
   }
 
   return (
-    <div className="rounded-2xl border border-[#333333] bg-[#141414] p-4">
-      <p className="text-sm font-semibold text-[#90A4AE]">Adicionar a qual orçamento?</p>
+    <div className="rounded-lg border border-line bg-background p-4">
+      <p className="text-sm font-semibold text-steel">Adicionar a qual orçamento?</p>
       {carregando ? (
-        <p className="mt-2 text-xs text-[#78909C]">Carregando orçamentos...</p>
+        <p className="mt-2 text-xs text-muted">Carregando orçamentos...</p>
       ) : (
         <select
           value={orcamentoId}
           onChange={(e) => setOrcamentoId(e.target.value)}
-          className="mt-2 h-10 w-full rounded-xl border border-[#333333] bg-[#212121] px-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+          className="mt-2 h-10 w-full rounded-xl border border-line bg-panel px-3 text-sm text-foreground outline-none focus:border-accent"
         >
           <option value="">Criar novo rascunho</option>
           {orcamentos.map((o) => (

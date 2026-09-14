@@ -51,15 +51,15 @@ export default function OxicorteParametrosForm({
     <div className="flex flex-col gap-5">
       <FeedbackBloco mensagem={mensagem} erro={erro} />
 
-      <div className="rounded-2xl border border-[#2a2a2a] bg-[#141414] p-3 text-xs text-[#78909C]">
+      <div className="rounded-lg border border-panel-hover bg-background p-3 text-xs text-muted">
         Preço da chapa de aço carbono ({precoChapa !== undefined ? `R$${precoChapa.toFixed(2)}/kg` : "não definido"})
         e densidade ({densidadeChapa !== undefined ? `${densidadeChapa}kg/m³` : "não definida"}) são os mesmos usados
-        no laser — editáveis na aba Parâmetros do módulo <span className="font-semibold text-[#90A4AE]">Chapa</span>.
+        no laser — editáveis na aba Parâmetros do módulo <span className="font-semibold text-steel">Chapa</span>.
       </div>
 
       {GRUPOS.map((grupo) => (
         <Cartao key={grupo.titulo}>
-          <p className="mb-3 text-sm font-semibold text-[#90A4AE]">{grupo.titulo}</p>
+          <p className="mb-3 text-sm font-semibold text-steel">{grupo.titulo}</p>
           <div className="grid gap-4 sm:grid-cols-3">
             {grupo.chaves.map((chave) => (
               <Campo
@@ -74,23 +74,23 @@ export default function OxicorteParametrosForm({
       ))}
 
       <Cartao>
-        <p className="mb-1 text-sm font-semibold text-[#90A4AE]">Velocidade de corte — Oxicorte (m/min)</p>
-        <p className="mb-3 text-xs text-[#78909C]">Só aço carbono — o mecanismo de corte por combustão não funciona em inox/alumínio.</p>
-        <div className="overflow-x-auto rounded-2xl border border-[#2a2a2a]">
+        <p className="mb-1 text-sm font-semibold text-steel">Velocidade de corte — Oxicorte (m/min)</p>
+        <p className="mb-3 text-xs text-muted">Só aço carbono — o mecanismo de corte por combustão não funciona em inox/alumínio.</p>
+        <div className="overflow-x-auto rounded-lg border border-panel-hover">
           <table className="w-full min-w-[420px] text-center text-xs">
-            <thead className="bg-[#181818] text-[#90A4AE]"><tr><th className="px-3 py-2 text-left">Espessura</th><th className="px-3 py-2">Velocidade</th></tr></thead>
+            <thead className="bg-surface text-steel"><tr><th className="px-3 py-2 text-left">Espessura</th><th className="px-3 py-2">Velocidade</th></tr></thead>
             <tbody>
               {ESPESSURAS_OXICORTE.map((esp) => {
                 const chave = `oxicorte|aco_carbono|${esp}|1`;
                 return (
-                  <tr key={esp} className="border-t border-[#2a2a2a]">
-                    <td className="px-3 py-2 text-left font-semibold text-[#90A4AE]">{esp}mm</td>
+                  <tr key={esp} className="border-t border-panel-hover">
+                    <td className="px-3 py-2 text-left font-semibold text-steel">{esp}mm</td>
                     <td className="px-1.5 py-1.5">
                       <input
                         type="text"
                         value={velocidades[chave] ?? ""}
                         onChange={(e) => setVelocidade(chave, e.target.value)}
-                        className="h-8 w-20 rounded-lg border border-[#333333] bg-[#141414] px-1 text-center text-xs text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+                        className="h-8 w-20 rounded-lg border border-line bg-background px-1 text-center text-xs text-foreground outline-none focus:border-accent"
                       />
                     </td>
                   </tr>
@@ -102,11 +102,11 @@ export default function OxicorteParametrosForm({
       </Cartao>
 
       <Cartao>
-        <p className="mb-1 text-sm font-semibold text-[#90A4AE]">Velocidade de corte — Plasma (m/min)</p>
-        <p className="mb-3 text-xs text-[#78909C]">Só aço carbono cadastrado por enquanto — &quot;potência&quot; aqui é a amperagem do equipamento.</p>
-        <div className="overflow-x-auto rounded-2xl border border-[#2a2a2a]">
+        <p className="mb-1 text-sm font-semibold text-steel">Velocidade de corte — Plasma (m/min)</p>
+        <p className="mb-3 text-xs text-muted">Só aço carbono cadastrado por enquanto — &quot;potência&quot; aqui é a amperagem do equipamento.</p>
+        <div className="overflow-x-auto rounded-lg border border-panel-hover">
           <table className="w-full min-w-[420px] text-center text-xs">
-            <thead className="bg-[#181818] text-[#90A4AE]">
+            <thead className="bg-surface text-steel">
               <tr>
                 <th className="px-3 py-2 text-left">Espessura</th>
                 {AMPERAGENS.map((a) => <th key={a} className="px-3 py-2">{a}A</th>)}
@@ -114,8 +114,8 @@ export default function OxicorteParametrosForm({
             </thead>
             <tbody>
               {ESPESSURAS_PLASMA.map((esp) => (
-                <tr key={esp} className="border-t border-[#2a2a2a]">
-                  <td className="px-3 py-2 text-left font-semibold text-[#90A4AE]">{esp}mm</td>
+                <tr key={esp} className="border-t border-panel-hover">
+                  <td className="px-3 py-2 text-left font-semibold text-steel">{esp}mm</td>
                   {AMPERAGENS.map((amp) => {
                     const chave = `plasma|aco_carbono|${esp}|${amp}`;
                     return (
@@ -124,7 +124,7 @@ export default function OxicorteParametrosForm({
                           type="text"
                           value={velocidades[chave] ?? ""}
                           onChange={(e) => setVelocidade(chave, e.target.value)}
-                          className="h-8 w-16 rounded-lg border border-[#333333] bg-[#141414] px-1 text-center text-xs text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+                          className="h-8 w-16 rounded-lg border border-line bg-background px-1 text-center text-xs text-foreground outline-none focus:border-accent"
                         />
                       </td>
                     );

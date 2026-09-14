@@ -161,7 +161,7 @@ export default function SoldagemCalculadora({
             <button
               type="button"
               onClick={() => setPreparacao((prev) => [...prev, { id: crypto.randomUUID(), descricao: "", valor: "0" }])}
-              className="inline-flex h-8 items-center gap-1 rounded-xl border border-[#333333] bg-[#212121] px-2 text-xs font-semibold text-[#546E7A] hover:bg-[#2a2a2a]"
+              className="inline-flex h-8 items-center gap-1 rounded-xl border border-line bg-panel px-2 text-xs font-semibold text-muted hover:bg-panel-hover"
             >
               <Plus className="h-3.5 w-3.5" /> Adicionar
             </button>
@@ -173,14 +173,14 @@ export default function SoldagemCalculadora({
                 value={linha.descricao}
                 onChange={(e) => setPreparacao((prev) => prev.map((l) => (l.id === linha.id ? { ...l, descricao: e.target.value } : l)))}
                 placeholder="Descrição"
-                className="h-9 flex-1 rounded-xl border border-[#333333] bg-[#141414] px-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+                className="h-9 flex-1 rounded-xl border border-line bg-background px-3 text-sm text-foreground outline-none focus:border-accent"
               />
               <input
                 type="text"
                 value={linha.valor}
                 onChange={(e) => setPreparacao((prev) => prev.map((l) => (l.id === linha.id ? { ...l, valor: e.target.value } : l)))}
                 placeholder="0,00"
-                className="h-9 w-28 rounded-xl border border-[#333333] bg-[#141414] px-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+                className="h-9 w-28 rounded-xl border border-line bg-background px-3 text-sm text-foreground outline-none focus:border-accent"
               />
               <button
                 type="button"
@@ -193,16 +193,16 @@ export default function SoldagemCalculadora({
           ))}
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-3 rounded-2xl border border-[#2a2a2a] bg-[#141414] p-3 text-sm sm:grid-cols-4">
-          <div><p className="text-xs text-[#78909C]">Tempo estimado</p><p className="font-semibold">{previa.tempoSoldaMin.toFixed(1)}min</p></div>
-          <div><p className="text-xs text-[#78909C]">Mão de obra</p><p className="font-semibold">{previa.custoMaoDeObra.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
-          <div><p className="text-xs text-[#78909C]">Máquina + consumíveis</p><p className="font-semibold">{(previa.custoMaquina + previa.custoConsumiveis).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
-          <div><p className="text-xs text-[#78909C]">Preparação</p><p className="font-semibold">{previa.custoPreparacao.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
+        <div className="mt-4 grid grid-cols-2 gap-3 rounded-lg border border-panel-hover bg-background p-3 text-sm sm:grid-cols-4">
+          <div><p className="text-xs text-muted">Tempo estimado</p><p className="font-semibold">{previa.tempoSoldaMin.toFixed(1)}min</p></div>
+          <div><p className="text-xs text-muted">Mão de obra</p><p className="font-semibold">{previa.custoMaoDeObra.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
+          <div><p className="text-xs text-muted">Máquina + consumíveis</p><p className="font-semibold">{(previa.custoMaquina + previa.custoConsumiveis).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
+          <div><p className="text-xs text-muted">Preparação</p><p className="font-semibold">{previa.custoPreparacao.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
         </div>
 
         <p className="mt-3 text-sm">
-          Custo por peça: <span className="font-semibold text-[#90A4AE]">{previa.custoUnitario.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
-          {" · "}Total do lote desta peça: <span className="font-semibold text-[#90A4AE]">{previa.custoTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
+          Custo por peça: <span className="font-semibold text-steel">{previa.custoUnitario.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
+          {" · "}Total do lote desta peça: <span className="font-semibold text-steel">{previa.custoTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
         </p>
 
         <div className="mt-4">
@@ -212,10 +212,10 @@ export default function SoldagemCalculadora({
 
       {lote.length > 0 && (
         <Cartao>
-          <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Lote ({lote.length} peça{lote.length === 1 ? "" : "s"})</p>
-          <div className="overflow-x-auto rounded-2xl border border-[#2a2a2a]">
+          <p className="mb-3 text-sm font-semibold text-steel">Lote ({lote.length} peça{lote.length === 1 ? "" : "s"})</p>
+          <div className="overflow-x-auto rounded-lg border border-panel-hover">
             <table className="w-full min-w-[760px] text-left text-sm">
-              <thead className="bg-[#181818] text-[#90A4AE]">
+              <thead className="bg-surface text-steel">
                 <tr>
                   <Th>Peça</Th>
                   <Th>Junta</Th>
@@ -228,20 +228,20 @@ export default function SoldagemCalculadora({
               </thead>
               <tbody>
                 {lote.map((p) => (
-                  <tr key={p.id} className="border-t border-[#2a2a2a] align-top">
+                  <tr key={p.id} className="border-t border-panel-hover align-top">
                     <Td className="font-semibold">{p.nome}</Td>
-                    <Td className="text-xs text-[#78909C]">{TIPOS_JUNTA.find((t) => t.valor === p.tipoJunta)?.label}, {p.espessuraMm}mm</Td>
-                    <Td className="text-xs text-[#78909C]">{PROCESSOS_SOLDA.find((pr) => pr.valor === p.processo)?.label}</Td>
+                    <Td className="text-xs text-muted">{TIPOS_JUNTA.find((t) => t.valor === p.tipoJunta)?.label}, {p.espessuraMm}mm</Td>
+                    <Td className="text-xs text-muted">{PROCESSOS_SOLDA.find((pr) => pr.valor === p.processo)?.label}</Td>
                     <Td>{p.quantidade}</Td>
                     <Td>{p.custoUnitario.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</Td>
-                    <Td className="font-semibold text-[#90A4AE]">{p.custoTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</Td>
+                    <Td className="font-semibold text-steel">{p.custoTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</Td>
                     <Td>
                       <div className="flex flex-col gap-2">
                         <button
                           type="button"
                           onClick={() => salvarNoHistorico(p)}
                           disabled={salvandoId === p.id}
-                          className="inline-flex h-8 items-center gap-1 rounded-xl border border-[#333333] bg-[#212121] px-2 text-xs font-semibold text-[#546E7A] transition hover:bg-[#2a2a2a]"
+                          className="inline-flex h-8 items-center gap-1 rounded-xl border border-line bg-panel px-2 text-xs font-semibold text-muted transition hover:bg-panel-hover"
                         >
                           <Save className="h-3.5 w-3.5" /> Salvar
                         </button>
@@ -268,7 +268,7 @@ export default function SoldagemCalculadora({
             </table>
           </div>
           <p className="mt-4 text-right text-base font-bold">
-            Total do lote: <span className="text-[#90A4AE]">{totalLote.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
+            Total do lote: <span className="text-steel">{totalLote.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
           </p>
         </Cartao>
       )}

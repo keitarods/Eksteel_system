@@ -48,10 +48,10 @@ export default function OrcamentoItensEditor({
 
   return (
     <div>
-      <div className="overflow-hidden rounded-2xl border border-[#2a2a2a]">
+      <div className="overflow-hidden rounded-lg border border-panel-hover">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] text-left text-sm">
-            <thead className="bg-[#181818] text-[#90A4AE]">
+            <thead className="bg-surface text-steel">
               <tr>
                 <Th>Tipo</Th>
                 <Th>Descrição</Th>
@@ -66,12 +66,12 @@ export default function OrcamentoItensEditor({
               {itens.map((it) => {
                 const total = valorTotalItem(parseNumero(it.quantidade), parseNumero(it.valorUnitario));
                 return (
-                  <tr key={it.tempId} className="border-t border-[#2a2a2a] align-top">
+                  <tr key={it.tempId} className="border-t border-panel-hover align-top">
                     <Td>
                       <select
                         value={it.tipoItem}
                         onChange={(e) => atualizar(it.tempId, "tipoItem", e.target.value)}
-                        className="h-9 rounded-xl border border-[#333333] bg-[#141414] px-2 text-xs text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+                        className="h-9 rounded-xl border border-line bg-background px-2 text-xs text-foreground outline-none focus:border-accent"
                       >
                         <option value="produto">Produto</option>
                         <option value="servico">Serviço</option>
@@ -83,7 +83,7 @@ export default function OrcamentoItensEditor({
                         value={it.descricao}
                         onChange={(e) => atualizar(it.tempId, "descricao", e.target.value)}
                         placeholder="Descrição do item"
-                        className="h-9 w-full rounded-xl border border-[#333333] bg-[#141414] px-2 text-xs text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+                        className="h-9 w-full rounded-xl border border-line bg-background px-2 text-xs text-foreground outline-none focus:border-accent"
                       />
                       {it.tipoItem === "servico" && (
                         <textarea
@@ -91,7 +91,7 @@ export default function OrcamentoItensEditor({
                           onChange={(e) => atualizar(it.tempId, "detalhamentoTecnico", e.target.value)}
                           placeholder="Detalhamento técnico: material, dimensões, norma, processo de fabricação..."
                           rows={2}
-                          className="mt-1.5 w-full rounded-xl border border-[#333333] bg-[#141414] px-2 py-1.5 text-xs text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+                          className="mt-1.5 w-full rounded-xl border border-line bg-background px-2 py-1.5 text-xs text-foreground outline-none focus:border-accent"
                         />
                       )}
                     </Td>
@@ -100,7 +100,7 @@ export default function OrcamentoItensEditor({
                         type="text"
                         value={it.unidade}
                         onChange={(e) => atualizar(it.tempId, "unidade", e.target.value)}
-                        className="h-9 w-16 rounded-xl border border-[#333333] bg-[#141414] px-2 text-xs text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+                        className="h-9 w-16 rounded-xl border border-line bg-background px-2 text-xs text-foreground outline-none focus:border-accent"
                       />
                     </Td>
                     <Td>
@@ -108,7 +108,7 @@ export default function OrcamentoItensEditor({
                         type="text"
                         value={it.quantidade}
                         onChange={(e) => atualizar(it.tempId, "quantidade", e.target.value)}
-                        className="h-9 w-16 rounded-xl border border-[#333333] bg-[#141414] px-2 text-xs text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+                        className="h-9 w-16 rounded-xl border border-line bg-background px-2 text-xs text-foreground outline-none focus:border-accent"
                       />
                     </Td>
                     <Td>
@@ -117,10 +117,10 @@ export default function OrcamentoItensEditor({
                         value={it.valorUnitario}
                         onChange={(e) => atualizar(it.tempId, "valorUnitario", e.target.value)}
                         placeholder="0,00"
-                        className="h-9 w-24 rounded-xl border border-[#333333] bg-[#141414] px-2 text-xs text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+                        className="h-9 w-24 rounded-xl border border-line bg-background px-2 text-xs text-foreground outline-none focus:border-accent"
                       />
                     </Td>
-                    <Td className="font-semibold text-[#90A4AE]">{formatarMoeda(total)}</Td>
+                    <Td className="font-semibold text-steel">{formatarMoeda(total)}</Td>
                     <Td>
                       <button
                         type="button"
@@ -135,7 +135,7 @@ export default function OrcamentoItensEditor({
               })}
               {itens.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-6 text-center text-sm text-[#78909C]">
+                  <td colSpan={7} className="px-4 py-6 text-center text-sm text-muted">
                     Nenhum item adicionado ainda.
                   </td>
                 </tr>
@@ -147,7 +147,7 @@ export default function OrcamentoItensEditor({
       <button
         type="button"
         onClick={adicionar}
-        className="mt-3 inline-flex h-10 items-center gap-1.5 rounded-xl border border-[#333333] bg-[#212121] px-4 text-sm font-semibold text-[#546E7A] transition hover:bg-[#2a2a2a]"
+        className="mt-3 inline-flex h-10 items-center gap-1.5 rounded-xl border border-line bg-panel px-4 text-sm font-semibold text-muted transition hover:bg-panel-hover"
       >
         <Plus className="h-4 w-4" /> Adicionar item
       </button>

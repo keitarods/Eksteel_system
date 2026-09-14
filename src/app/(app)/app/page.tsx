@@ -45,7 +45,7 @@ export default async function AppPage() {
     user.user_metadata?.nome_completo || user.email || "usuário";
 
   return (
-    <main className="min-h-screen bg-[#1e1e1e] px-3 py-6 text-[#ECEFF1] sm:px-6 sm:py-10">
+    <main className="min-h-screen bg-background px-3 py-6 text-foreground sm:px-6 sm:py-10">
       <section className="mx-auto max-w-7xl">
 
         {/* ── Header ── */}
@@ -61,27 +61,27 @@ export default async function AppPage() {
                 unoptimized
                 className="h-11 w-auto object-contain"
               />
-              <div className="h-8 w-px bg-[#333333]" />
-              <p className="text-sm font-semibold text-[#90A4AE]">
+              <div className="h-8 w-px bg-line" />
+              <p className="text-sm font-semibold text-steel">
                 Ambiente interno
               </p>
             </div>
             <h1 className="text-2xl font-bold sm:text-3xl md:text-4xl">
               Olá, {nomeUsuario}
             </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-[#78909C] md:text-base">
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-muted md:text-base">
               Central de controle operacional e financeiro da empresa. Acesse os
               módulos abaixo para acompanhar resultados, estoque e indicadores.
             </p>
           </div>
 
-          <div className="flex self-start items-center gap-3 rounded-3xl border border-white/10 bg-white/5 p-3 shadow-sm backdrop-blur-sm sm:shrink-0">
+          <div className="flex self-start items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-3 shadow-sm backdrop-blur-sm sm:shrink-0">
             <div className="flex flex-col">
-              <span className="max-w-[200px] truncate text-sm font-semibold text-[#90A4AE]">
+              <span className="max-w-[200px] truncate text-sm font-semibold text-steel">
                 {nomeUsuario}
               </span>
               {user.email ? (
-                <span className="max-w-[200px] truncate text-xs text-[#78909C]">
+                <span className="max-w-[200px] truncate text-xs text-muted">
                   {user.email}
                 </span>
               ) : null}
@@ -94,15 +94,15 @@ export default async function AppPage() {
         <div className="grid gap-4 sm:gap-6 md:grid-cols-2 xl:grid-cols-3">
 
           {/* Dashboard Geral */}
-          <article className="flex flex-col rounded-3xl border border-[#333333] bg-[#212121] p-5 shadow-sm sm:p-6">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#546E7A]/20 text-[#90A4AE]">
+          <article className="flex flex-col rounded-xl border border-line bg-panel p-5 shadow-sm sm:p-6">
+            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-accent/20 text-steel">
               <ShoppingCart className="h-5 w-5" />
             </div>
-            <p className="mt-5 text-sm font-semibold text-[#90A4AE]">
+            <p className="mt-5 text-sm font-semibold text-steel">
               Operacional
             </p>
             <h2 className="mt-1 text-xl font-bold">Dashboard Geral</h2>
-            <p className="mt-2 text-sm leading-6 text-[#78909C]">
+            <p className="mt-2 text-sm leading-6 text-muted">
               Visualize vendas por marketplace, cadastre produtos, controle
               estoque e acompanhe indicadores financeiros.
             </p>
@@ -112,16 +112,16 @@ export default async function AppPage() {
                 [
                   ["Vendas", BarChart3],
                   ["Estoque", Boxes],
-                  ["Lucro", TrendingUp],
+                  ["Resultado", TrendingUp],
                   ["Compras", PackagePlus],
                 ] as const
               ).map(([label, Icon]) => (
                 <div
                   key={label}
-                  className="flex items-center gap-2 rounded-2xl border border-[#2a2a2a] bg-[#181818] px-3 py-2"
+                  className="flex items-center gap-2 rounded-lg border border-panel-hover bg-surface px-3 py-2"
                 >
-                  <Icon className="h-4 w-4 shrink-0 text-[#90A4AE]" />
-                  <p className="text-xs font-semibold text-[#ECEFF1]">
+                  <Icon className="h-4 w-4 shrink-0 text-steel" />
+                  <p className="text-xs font-semibold text-foreground">
                     {label}
                   </p>
                 </div>
@@ -131,7 +131,7 @@ export default async function AppPage() {
             <div className="mt-auto pt-5">
               <Link
                 href="/dashboard"
-                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-[#546E7A] px-4 text-sm font-semibold text-white transition hover:bg-[#455A64]"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent px-4 text-sm font-semibold text-background transition hover:bg-accent-dark"
               >
                 Acessar dashboard
                 <ArrowRight className="h-4 w-4" />
@@ -140,17 +140,17 @@ export default async function AppPage() {
           </article>
 
           {/* Financeiro */}
-          <article className="flex flex-col rounded-3xl border border-[#333333] bg-[#212121] p-5 shadow-sm sm:p-6">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#546E7A]/20 text-[#90A4AE]">
+          <article className="flex flex-col rounded-xl border border-line bg-panel p-5 shadow-sm sm:p-6">
+            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-accent/20 text-steel">
               <DollarSign className="h-5 w-5" />
             </div>
-            <p className="mt-5 text-sm font-semibold text-[#90A4AE]">
+            <p className="mt-5 text-sm font-semibold text-steel">
               Financeiro
             </p>
-            <h2 className="mt-1 text-xl font-bold">Fluxo de Caixa</h2>
-            <p className="mt-2 text-sm leading-6 text-[#78909C]">
-              Registre despesas operacionais, acompanhe entradas e saídas e
-              visualize o resultado líquido do período.
+            <h2 className="mt-1 text-xl font-bold">Relatórios gerenciais</h2>
+            <p className="mt-2 text-sm leading-6 text-muted">
+              Consulte os itens mais vendidos, a DRE gerencial, despesas e
+              a posição parcial do patrimônio disponível no estoque.
             </p>
 
             <div className="mt-4 grid grid-cols-2 gap-2">
@@ -159,15 +159,15 @@ export default async function AppPage() {
                   ["Despesas", DollarSign],
                   ["Receita", TrendingUp],
                   ["Margem", BarChart3],
-                  ["Balancete", Scale],
+                  ["Estoque", Scale],
                 ] as const
               ).map(([label, Icon]) => (
                 <div
                   key={label}
-                  className="flex items-center gap-2 rounded-2xl border border-[#2a2a2a] bg-[#181818] px-3 py-2"
+                  className="flex items-center gap-2 rounded-lg border border-panel-hover bg-surface px-3 py-2"
                 >
-                  <Icon className="h-4 w-4 shrink-0 text-[#90A4AE]" />
-                  <p className="text-xs font-semibold text-[#ECEFF1]">
+                  <Icon className="h-4 w-4 shrink-0 text-steel" />
+                  <p className="text-xs font-semibold text-foreground">
                     {label}
                   </p>
                 </div>
@@ -176,25 +176,25 @@ export default async function AppPage() {
 
             <div className="mt-auto pt-5">
               <Link
-                href="/dashboard?aba=balancete"
-                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-[#333333] bg-[#181818] px-4 text-sm font-semibold text-[#90A4AE] transition hover:bg-[#2a2a2a]"
+                href="/dashboard?aba=relatorios"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-line bg-surface px-4 text-sm font-semibold text-steel transition hover:bg-panel-hover"
               >
-                Ver financeiro
+                Ver relatórios
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </div>
           </article>
 
           {/* Estoque */}
-          <article className="flex flex-col rounded-3xl border border-[#333333] bg-[#212121] p-5 shadow-sm sm:p-6 md:col-span-2 xl:col-span-1">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#546E7A]/20 text-[#90A4AE]">
+          <article className="flex flex-col rounded-xl border border-line bg-panel p-5 shadow-sm sm:p-6 md:col-span-2 xl:col-span-1">
+            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-accent/20 text-steel">
               <Boxes className="h-5 w-5" />
             </div>
-            <p className="mt-5 text-sm font-semibold text-[#90A4AE]">
+            <p className="mt-5 text-sm font-semibold text-steel">
               Inventário
             </p>
             <h2 className="mt-1 text-xl font-bold">Controle de Estoque</h2>
-            <p className="mt-2 text-sm leading-6 text-[#78909C]">
+            <p className="mt-2 text-sm leading-6 text-muted">
               Monitore o saldo de produtos, alertas de estoque mínimo e
               movimentações de entrada e saída.
             </p>
@@ -210,10 +210,10 @@ export default async function AppPage() {
               ).map(([label, Icon]) => (
                 <div
                   key={label}
-                  className="flex items-center gap-2 rounded-2xl border border-[#2a2a2a] bg-[#181818] px-3 py-2"
+                  className="flex items-center gap-2 rounded-lg border border-panel-hover bg-surface px-3 py-2"
                 >
-                  <Icon className="h-4 w-4 shrink-0 text-[#90A4AE]" />
-                  <p className="text-xs font-semibold text-[#ECEFF1]">
+                  <Icon className="h-4 w-4 shrink-0 text-steel" />
+                  <p className="text-xs font-semibold text-foreground">
                     {label}
                   </p>
                 </div>
@@ -223,7 +223,7 @@ export default async function AppPage() {
             <div className="mt-auto pt-5">
               <Link
                 href="/dashboard?aba=estoque"
-                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-[#333333] bg-[#181818] px-4 text-sm font-semibold text-[#90A4AE] transition hover:bg-[#2a2a2a]"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-line bg-surface px-4 text-sm font-semibold text-steel transition hover:bg-panel-hover"
               >
                 Ver estoque
                 <ArrowRight className="h-4 w-4" />
@@ -232,15 +232,15 @@ export default async function AppPage() {
           </article>
 
           {/* Orçamentos */}
-          <article className="flex flex-col rounded-3xl border border-[#333333] bg-[#212121] p-5 shadow-sm sm:p-6">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#546E7A]/20 text-[#90A4AE]">
+          <article className="flex flex-col rounded-xl border border-line bg-panel p-5 shadow-sm sm:p-6">
+            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-accent/20 text-steel">
               <FileText className="h-5 w-5" />
             </div>
-            <p className="mt-5 text-sm font-semibold text-[#90A4AE]">
+            <p className="mt-5 text-sm font-semibold text-steel">
               Comercial
             </p>
             <h2 className="mt-1 text-xl font-bold">Orçamentos</h2>
-            <p className="mt-2 text-sm leading-6 text-[#78909C]">
+            <p className="mt-2 text-sm leading-6 text-muted">
               Monte propostas comerciais e de engenharia item a item e gere a
               folha de orçamento em PDF pra enviar ao cliente.
             </p>
@@ -256,10 +256,10 @@ export default async function AppPage() {
               ).map(([label, Icon]) => (
                 <div
                   key={label}
-                  className="flex items-center gap-2 rounded-2xl border border-[#2a2a2a] bg-[#181818] px-3 py-2"
+                  className="flex items-center gap-2 rounded-lg border border-panel-hover bg-surface px-3 py-2"
                 >
-                  <Icon className="h-4 w-4 shrink-0 text-[#90A4AE]" />
-                  <p className="text-xs font-semibold text-[#ECEFF1]">
+                  <Icon className="h-4 w-4 shrink-0 text-steel" />
+                  <p className="text-xs font-semibold text-foreground">
                     {label}
                   </p>
                 </div>
@@ -269,7 +269,7 @@ export default async function AppPage() {
             <div className="mt-auto pt-5">
               <Link
                 href="/orcamentos"
-                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-[#546E7A] px-4 text-sm font-semibold text-white transition hover:bg-[#455A64]"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent px-4 text-sm font-semibold text-background transition hover:bg-accent-dark"
               >
                 Acessar orçamentos
                 <ArrowRight className="h-4 w-4" />
@@ -278,15 +278,15 @@ export default async function AppPage() {
           </article>
 
           {/* Calculadora de custos */}
-          <article className="flex flex-col rounded-3xl border border-[#333333] bg-[#212121] p-5 shadow-sm sm:p-6">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#546E7A]/20 text-[#90A4AE]">
+          <article className="flex flex-col rounded-xl border border-line bg-panel p-5 shadow-sm sm:p-6">
+            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-accent/20 text-steel">
               <Calculator className="h-5 w-5" />
             </div>
-            <p className="mt-5 text-sm font-semibold text-[#90A4AE]">
+            <p className="mt-5 text-sm font-semibold text-steel">
               Comercial
             </p>
             <h2 className="mt-1 text-xl font-bold">Calculadora de Custos</h2>
-            <p className="mt-2 text-sm leading-6 text-[#78909C]">
+            <p className="mt-2 text-sm leading-6 text-muted">
               Precifique chapa (DXF), tubos/perfis e a composição final de uma
               peça, com parâmetros de mercado editáveis.
             </p>
@@ -302,10 +302,10 @@ export default async function AppPage() {
               ).map(([label, Icon]) => (
                 <div
                   key={label}
-                  className="flex items-center gap-2 rounded-2xl border border-[#2a2a2a] bg-[#181818] px-3 py-2"
+                  className="flex items-center gap-2 rounded-lg border border-panel-hover bg-surface px-3 py-2"
                 >
-                  <Icon className="h-4 w-4 shrink-0 text-[#90A4AE]" />
-                  <p className="text-xs font-semibold text-[#ECEFF1]">
+                  <Icon className="h-4 w-4 shrink-0 text-steel" />
+                  <p className="text-xs font-semibold text-foreground">
                     {label}
                   </p>
                 </div>
@@ -315,7 +315,7 @@ export default async function AppPage() {
             <div className="mt-auto pt-5">
               <Link
                 href="/calculadora"
-                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-[#333333] bg-[#181818] px-4 text-sm font-semibold text-[#90A4AE] transition hover:bg-[#2a2a2a]"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-line bg-surface px-4 text-sm font-semibold text-steel transition hover:bg-panel-hover"
               >
                 Acessar calculadora
                 <ArrowRight className="h-4 w-4" />
@@ -325,7 +325,7 @@ export default async function AppPage() {
         </div>
 
         {/* ── Footer ── */}
-        <p className="mt-10 text-center text-xs text-[#455A64]">
+        <p className="mt-10 text-center text-xs text-muted">
           Eksteel &copy; {new Date().getFullYear()} · Sistema interno
         </p>
       </section>

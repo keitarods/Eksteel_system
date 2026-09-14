@@ -28,7 +28,7 @@ export function Campo({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         required={required}
-        className="h-11 w-full rounded-2xl border border-[#333333] bg-[#141414] px-4 text-sm text-[#ECEFF1] outline-none placeholder:text-[#546E7A] focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+        className="h-11 w-full rounded-lg border border-line bg-background px-4 text-sm text-foreground outline-none placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent-dark"
       />
     </div>
   );
@@ -55,7 +55,7 @@ export function CampoTextarea({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         rows={rows}
-        className="w-full rounded-2xl border border-[#333333] bg-[#141414] px-4 py-3 text-sm text-[#ECEFF1] outline-none placeholder:text-[#546E7A] focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+        className="w-full rounded-lg border border-line bg-background px-4 py-3 text-sm text-foreground outline-none placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent-dark"
       />
     </div>
   );
@@ -80,7 +80,7 @@ export function SelectCampo({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-11 w-full rounded-2xl border border-[#333333] bg-[#141414] px-4 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A] focus:ring-2 focus:ring-[#37474F]"
+        className="h-11 w-full rounded-lg border border-line bg-background px-4 text-sm text-foreground outline-none focus:border-accent focus:ring-2 focus:ring-accent-dark"
       >
         <option value="">{placeholder}</option>
         {options.map((o) => (
@@ -101,7 +101,7 @@ export function Td({ children, className = "" }: { children: React.ReactNode; cl
 
 export function Cartao({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={`rounded-3xl border border-[#333333] bg-[#212121] p-4 shadow-sm sm:p-6 ${className}`}>
+    <div className={`rounded-xl border border-line bg-panel p-4 shadow-sm sm:p-6 ${className}`}>
       {children}
     </div>
   );
@@ -122,10 +122,10 @@ export function Botao({
   disabled?: boolean;
   className?: string;
 }) {
-  const base = "inline-flex h-11 items-center justify-center gap-2 rounded-2xl px-4 text-sm font-semibold transition disabled:opacity-60";
+  const base = "inline-flex h-11 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold transition disabled:opacity-60";
   const estilos = {
-    primario: "bg-[#546E7A] text-white hover:bg-[#455A64]",
-    secundario: "border border-[#333333] bg-[#212121] text-[#90A4AE] hover:bg-[#2a2a2a]",
+    primario: "bg-accent text-background hover:bg-accent-dark",
+    secundario: "border border-line bg-panel text-steel hover:bg-panel-hover",
     perigo: "border border-red-900/50 bg-red-900/10 text-red-400 hover:bg-red-900/30",
   };
   return (
@@ -139,7 +139,7 @@ export function FeedbackBloco({ mensagem, erro }: { mensagem?: string; erro?: st
   if (!mensagem && !erro) return null;
   return (
     <div
-      className={`mt-4 rounded-2xl border px-4 py-3 text-sm ${
+      className={`mt-4 rounded-lg border px-4 py-3 text-sm ${
         erro
           ? "border-red-900/50 bg-red-900/10 text-red-400"
           : "border-emerald-900/50 bg-emerald-900/10 text-emerald-400"

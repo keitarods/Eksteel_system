@@ -30,15 +30,15 @@ export default async function ComposicaoPage() {
   const pecas = (pecasRaw ?? []).map(mapCalculoPeca);
 
   return (
-    <main className="min-h-screen bg-[#1e1e1e] px-3 py-5 text-[#ECEFF1] sm:px-6 sm:py-8">
+    <main className="min-h-screen bg-background px-3 py-5 text-foreground sm:px-6 sm:py-8">
       <section className="mx-auto max-w-4xl">
-        <Link href="/calculadora" className="mb-2 inline-flex items-center gap-2 text-sm font-semibold text-[#90A4AE] transition hover:text-[#ECEFF1]">
+        <Link href="/calculadora" className="mb-2 inline-flex items-center gap-2 text-sm font-semibold text-steel transition hover:text-foreground">
           <ArrowLeft className="h-4 w-4" />
           Voltar à calculadora
         </Link>
-        <p className="text-sm font-semibold text-[#90A4AE]">Calculadora</p>
+        <p className="text-sm font-semibold text-steel">Calculadora</p>
         <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Composição final de custo</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-[#78909C]">
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
           Some peças já calculadas, mão de obra e insumos, aplique perda de material e margem — e veja o preço
           sugerido com o detalhamento completo.
         </p>

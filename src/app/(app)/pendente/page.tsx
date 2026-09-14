@@ -23,10 +23,10 @@ export default async function PendentePage() {
   const nome = user.user_metadata?.nome_completo || user.email || "usuário";
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[#1e1e1e] p-6 text-white">
-      <div className="w-full max-w-md rounded-3xl border border-white/10 bg-white/5 p-10 text-center backdrop-blur-md">
-        <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full border border-[#90A4AE]/30 bg-[#546E7A]/20">
-          <Clock className="h-7 w-7 text-[#90A4AE]" />
+    <main className="flex min-h-screen items-center justify-center bg-background p-6 text-white">
+      <div className="w-full max-w-md rounded-xl border border-white/10 bg-white/5 p-10 text-center backdrop-blur-md">
+        <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full border border-line/30 bg-accent/20">
+          <Clock className="h-7 w-7 text-steel" />
         </div>
 
         <h1 className="text-2xl font-bold">Aguardando aprovação</h1>
@@ -45,7 +45,7 @@ export default async function PendentePage() {
 
         <div className="mt-8 flex justify-center">
           <LogoutButton
-            className="inline-flex h-10 items-center gap-2 rounded-2xl border border-[#90A4AE]/40 bg-white/10 px-5 text-sm font-semibold text-[#90A4AE] transition hover:bg-white/15"
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-line/40 bg-white/10 px-5 text-sm font-semibold text-steel transition hover:bg-white/15"
             label="Sair da conta"
           />
         </div>

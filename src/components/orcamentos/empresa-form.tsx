@@ -58,7 +58,7 @@ export default function EmpresaForm({
           </div>
           <Campo label="Site" value={site} onChange={setSite} placeholder="gestao.eksteelsolucoes.com.br" />
         </div>
-        <p className="mt-4 text-xs text-[#78909C]">
+        <p className="mt-4 text-xs text-muted">
           Esses dados aparecem no cabeçalho e rodapé do PDF de orçamento e na página pública de visualização.
           O CNPJ agora fica na lista logo abaixo — cada orçamento escolhe qual usar.
         </p>

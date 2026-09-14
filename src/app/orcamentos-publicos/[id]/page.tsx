@@ -28,12 +28,12 @@ export default async function OrcamentoPublicoPage({ params }: { params: Promise
   const dataValidade = calcularDataValidade(orcamento.dataEmissao, orcamento.validadeDias);
 
   return (
-    <main className="min-h-screen bg-[#1e1e1e] px-3 py-8 text-[#ECEFF1] sm:px-6">
+    <main className="min-h-screen bg-background px-3 py-8 text-foreground sm:px-6">
       <section className="mx-auto max-w-3xl">
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#333333] pb-6">
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-line pb-6">
           <Image src="/images/Eksteel-logo.png" alt="Eksteel" width={150} height={46} unoptimized className="h-11 w-auto object-contain" />
-          <div className="text-right text-xs text-[#78909C]">
-            <p className="font-semibold text-[#90A4AE]">{empresa.razaoSocial}</p>
+          <div className="text-right text-xs text-muted">
+            <p className="font-semibold text-steel">{empresa.razaoSocial}</p>
             {orcamento.cnpjEmissor && <p>{orcamento.cnpjEmissorLabel} — CNPJ: {orcamento.cnpjEmissor}</p>}
             <p>{empresa.telefone} · {empresa.email}</p>
           </div>
@@ -41,11 +41,11 @@ export default async function OrcamentoPublicoPage({ params }: { params: Promise
 
         <div className="mt-6 flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-semibold text-[#90A4AE]">Orçamento</p>
+            <p className="text-sm font-semibold text-steel">Orçamento</p>
             <h1 className="mt-0.5 text-3xl font-bold">{orcamento.numero}</h1>
             <div className="mt-2"><StatusBadge status={orcamento.status} /></div>
           </div>
-          <div className="text-right text-sm text-[#78909C]">
+          <div className="text-right text-sm text-muted">
             <p>Emissão: {formatarData(orcamento.dataEmissao)}</p>
             <p>Validade: {formatarData(dataValidade)}</p>
           </div>
@@ -55,23 +55,23 @@ export default async function OrcamentoPublicoPage({ params }: { params: Promise
           href={`/api/orcamentos/${orcamento.id}/pdf`}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-5 inline-flex h-11 items-center gap-2 rounded-2xl bg-[#546E7A] px-5 text-sm font-semibold text-white transition hover:bg-[#455A64]"
+          className="mt-5 inline-flex h-11 items-center gap-2 rounded-lg bg-accent px-5 text-sm font-semibold text-background transition hover:bg-accent-dark"
         >
           <FileDown className="h-4 w-4" /> Baixar PDF
         </a>
 
-        <div className="mt-6 rounded-3xl border border-[#333333] bg-[#212121] p-5 sm:p-6">
-          <p className="mb-2 text-sm font-semibold text-[#90A4AE]">Cliente</p>
+        <div className="mt-6 rounded-xl border border-line bg-panel p-5 sm:p-6">
+          <p className="mb-2 text-sm font-semibold text-steel">Cliente</p>
           <p className="text-lg font-bold">{cliente?.nome || "-"}</p>
-          <p className="mt-1 text-sm text-[#78909C]">
+          <p className="mt-1 text-sm text-muted">
             {[cliente?.cnpjCpf, cliente?.telefone, cliente?.email].filter(Boolean).join(" · ")}
           </p>
         </div>
 
-        <div className="mt-6 overflow-hidden rounded-3xl border border-[#333333]">
+        <div className="mt-6 overflow-hidden rounded-xl border border-line">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[560px] bg-[#212121] text-left text-sm">
-              <thead className="bg-[#181818] text-[#90A4AE]">
+            <table className="w-full min-w-[560px] bg-panel text-left text-sm">
+              <thead className="bg-surface text-steel">
                 <tr>
                   <Th>Descrição</Th>
                   <Th>Unid.</Th>
@@ -82,17 +82,17 @@ export default async function OrcamentoPublicoPage({ params }: { params: Promise
               </thead>
               <tbody>
                 {itens.map((it) => (
-                  <tr key={it.id} className="border-t border-[#2a2a2a]">
+                  <tr key={it.id} className="border-t border-panel-hover">
                     <Td className="font-semibold">
                       {it.descricao}
                       {it.tipoItem === "servico" && it.detalhamentoTecnico && (
-                        <p className="mt-1 text-xs font-normal text-[#78909C]">{it.detalhamentoTecnico}</p>
+                        <p className="mt-1 text-xs font-normal text-muted">{it.detalhamentoTecnico}</p>
                       )}
                     </Td>
                     <Td>{it.unidade || "-"}</Td>
                     <Td>{it.quantidade}</Td>
                     <Td>{formatarMoeda(it.valorUnitario)}</Td>
-                    <Td className="font-semibold text-[#90A4AE]">{formatarMoeda(it.valorTotal)}</Td>
+                    <Td className="font-semibold text-steel">{formatarMoeda(it.valorTotal)}</Td>
                   </tr>
                 ))}
               </tbody>
@@ -101,26 +101,26 @@ export default async function OrcamentoPublicoPage({ params }: { params: Promise
         </div>
 
         <div className="ml-auto mt-4 w-full max-w-xs space-y-1.5">
-          <div className="flex items-center justify-between text-sm text-[#90A4AE]">
-            <span>Subtotal</span><span className="font-semibold text-[#ECEFF1]">{formatarMoeda(orcamento.subtotal)}</span>
+          <div className="flex items-center justify-between text-sm text-steel">
+            <span>Subtotal</span><span className="font-semibold text-foreground">{formatarMoeda(orcamento.subtotal)}</span>
           </div>
-          <div className="flex items-center justify-between text-sm text-[#90A4AE]">
-            <span>Desconto</span><span className="font-semibold text-[#ECEFF1]">- {formatarMoeda(orcamento.desconto)}</span>
+          <div className="flex items-center justify-between text-sm text-steel">
+            <span>Desconto</span><span className="font-semibold text-foreground">- {formatarMoeda(orcamento.desconto)}</span>
           </div>
-          <div className="flex items-center justify-between border-t border-[#2a2a2a] pt-2 text-base font-bold">
-            <span>Total</span><span className="text-[#90A4AE]">{formatarMoeda(orcamento.total)}</span>
+          <div className="flex items-center justify-between border-t border-panel-hover pt-2 text-base font-bold">
+            <span>Total</span><span className="text-steel">{formatarMoeda(orcamento.total)}</span>
           </div>
         </div>
 
-        <div className="mt-8 rounded-3xl border border-[#333333] bg-[#212121] p-5 text-sm text-[#78909C] sm:p-6">
-          <p><span className="font-semibold text-[#90A4AE]">Pagamento:</span> {orcamento.condicoesPagamento || "A combinar"}</p>
-          <p className="mt-1"><span className="font-semibold text-[#90A4AE]">Prazo de entrega:</span> {orcamento.prazoEntrega || "A combinar"}</p>
+        <div className="mt-8 rounded-xl border border-line bg-panel p-5 text-sm text-muted sm:p-6">
+          <p><span className="font-semibold text-steel">Pagamento:</span> {orcamento.condicoesPagamento || "A combinar"}</p>
+          <p className="mt-1"><span className="font-semibold text-steel">Prazo de entrega:</span> {orcamento.prazoEntrega || "A combinar"}</p>
           {orcamento.observacoes && (
-            <p className="mt-1"><span className="font-semibold text-[#90A4AE]">Observações:</span> {orcamento.observacoes}</p>
+            <p className="mt-1"><span className="font-semibold text-steel">Observações:</span> {orcamento.observacoes}</p>
           )}
         </div>
 
-        <p className="mt-8 text-center text-xs text-[#455A64]">
+        <p className="mt-8 text-center text-xs text-muted">
           {empresa.razaoSocial} · {empresa.site}
         </p>
       </section>

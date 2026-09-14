@@ -213,8 +213,8 @@ export default function ChapaCalculadora({
       <FeedbackBloco mensagem={mensagem} erro={erro} />
 
       <Cartao>
-        <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Nova peça</p>
-        <label className="flex h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-[#333333] bg-[#141414] text-sm text-[#78909C] transition hover:border-[#546E7A]">
+        <p className="mb-3 text-sm font-semibold text-steel">Nova peça</p>
+        <label className="flex h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-line bg-background text-sm text-muted transition hover:border-accent">
           <Upload className="h-5 w-5" />
           {arquivoAtual ? arquivoAtual.nome : "Clique pra subir um arquivo .DXF"}
           <input type="file" accept=".dxf" className="hidden" onChange={handleArquivo} />
@@ -223,18 +223,18 @@ export default function ChapaCalculadora({
         {arquivoAtual && previaPeca && (
           <div className="mt-5 grid gap-5 sm:grid-cols-[minmax(0,220px)_1fr]">
             <div
-              className="flex items-center justify-center rounded-2xl border border-[#2a2a2a] bg-[#141414] p-3"
+              className="flex items-center justify-center rounded-lg border border-panel-hover bg-background p-3"
               dangerouslySetInnerHTML={{ __html: arquivoAtual.svg }}
             />
             <div>
-              <div className="mb-3 flex gap-2 rounded-2xl border border-[#333333] bg-[#181818] p-1.5 self-start">
+              <div className="mb-3 flex gap-2 rounded-lg border border-line bg-surface p-1.5 self-start">
                 {PROCESSOS.map((p) => (
                   <button
                     key={p.valor}
                     type="button"
                     onClick={() => setProcesso(p.valor)}
                     className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
-                      processo === p.valor ? "bg-[#546E7A] text-white" : "text-[#90A4AE] hover:bg-[#2a2a2a]"
+                      processo === p.valor ? "bg-accent text-background" : "text-steel hover:bg-panel-hover"
                     }`}
                   >
                     {p.label}
@@ -262,28 +262,28 @@ export default function ChapaCalculadora({
                 )}
               </div>
 
-              <div className="mt-4 grid grid-cols-2 gap-3 rounded-2xl border border-[#2a2a2a] bg-[#141414] p-3 text-sm sm:grid-cols-4">
-                <div><p className="text-xs text-[#78909C]">Área</p><p className="font-semibold">{(arquivoAtual.resultado.areaMm2 / 100).toFixed(1)}cm²</p></div>
-                <div><p className="text-xs text-[#78909C]">Perímetro</p><p className="font-semibold">{(arquivoAtual.resultado.perimetroMm / 10).toFixed(1)}cm</p></div>
-                <div><p className="text-xs text-[#78909C]">Peso (un.)</p><p className="font-semibold">{previaPeca.pesoKg.toFixed(3)}kg</p></div>
-                <div><p className="text-xs text-[#78909C]">Tempo corte</p><p className="font-semibold">{previaPeca.tempoCorteMin.toFixed(1)}min</p></div>
+              <div className="mt-4 grid grid-cols-2 gap-3 rounded-lg border border-panel-hover bg-background p-3 text-sm sm:grid-cols-4">
+                <div><p className="text-xs text-muted">Área</p><p className="font-semibold">{(arquivoAtual.resultado.areaMm2 / 100).toFixed(1)}cm²</p></div>
+                <div><p className="text-xs text-muted">Perímetro</p><p className="font-semibold">{(arquivoAtual.resultado.perimetroMm / 10).toFixed(1)}cm</p></div>
+                <div><p className="text-xs text-muted">Peso (un.)</p><p className="font-semibold">{previaPeca.pesoKg.toFixed(3)}kg</p></div>
+                <div><p className="text-xs text-muted">Tempo corte</p><p className="font-semibold">{previaPeca.tempoCorteMin.toFixed(1)}min</p></div>
               </div>
 
               <p className="mt-3 text-sm">
-                Material: <span className="font-semibold text-[#90A4AE]">{previaPeca.custoMaterial.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
-                {" · "}Corte: <span className="font-semibold text-[#90A4AE]">{previaPeca.custoCorte.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
+                Material: <span className="font-semibold text-steel">{previaPeca.custoMaterial.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
+                {" · "}Corte: <span className="font-semibold text-steel">{previaPeca.custoCorte.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
                 {processo === "corte_dobra" && (
                   <>
-                    {" · "}Dobra: <span className="font-semibold text-[#90A4AE]">{previaPeca.custoDobra.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
+                    {" · "}Dobra: <span className="font-semibold text-steel">{previaPeca.custoDobra.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
                   </>
                 )}
-                {" · "}Setup (rateado{quantidade && parseNumero(quantidade) > 1 ? ` /${quantidade}` : ""}): <span className="font-semibold text-[#90A4AE]">{previaPeca.custoSetupRateado.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
+                {" · "}Setup (rateado{quantidade && parseNumero(quantidade) > 1 ? ` /${quantidade}` : ""}): <span className="font-semibold text-steel">{previaPeca.custoSetupRateado.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
               </p>
               <p className="mt-1 text-sm">
-                Custo por peça: <span className="font-semibold text-[#90A4AE]">
+                Custo por peça: <span className="font-semibold text-steel">
                   {previaPeca.custoUnitario.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
                 </span>
-                {" · "}Total do lote desta peça: <span className="font-semibold text-[#90A4AE]">
+                {" · "}Total do lote desta peça: <span className="font-semibold text-steel">
                   {previaPeca.custoTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
                 </span>
               </p>
@@ -298,10 +298,10 @@ export default function ChapaCalculadora({
 
       {lote.length > 0 && (
         <Cartao>
-          <p className="mb-3 text-sm font-semibold text-[#90A4AE]">Lote ({lote.length} peça{lote.length === 1 ? "" : "s"})</p>
-          <div className="overflow-x-auto rounded-2xl border border-[#2a2a2a]">
+          <p className="mb-3 text-sm font-semibold text-steel">Lote ({lote.length} peça{lote.length === 1 ? "" : "s"})</p>
+          <div className="overflow-x-auto rounded-lg border border-panel-hover">
             <table className="w-full min-w-[820px] text-left text-sm">
-              <thead className="bg-[#181818] text-[#90A4AE]">
+              <thead className="bg-surface text-steel">
                 <tr>
                   <Th>Arquivo</Th>
                   <Th>Material</Th>
@@ -316,17 +316,17 @@ export default function ChapaCalculadora({
               </thead>
               <tbody>
                 {lote.map((p) => (
-                  <tr key={p.id} className="border-t border-[#2a2a2a] align-top">
+                  <tr key={p.id} className="border-t border-panel-hover align-top">
                     <Td className="font-semibold">{p.nomeArquivo}</Td>
                     <Td>{MATERIAIS.find((m) => m.valor === p.material)?.label}</Td>
                     <Td>{p.espessuraMm}mm</Td>
-                    <Td className="text-xs text-[#78909C]">
+                    <Td className="text-xs text-muted">
                       {p.processo === "corte_dobra" ? `Corte + ${p.numeroDobras} dobra(s)` : "Só corte"}
                     </Td>
                     <Td>{p.quantidade}</Td>
                     <Td>{p.pesoKg.toFixed(3)}kg</Td>
                     <Td>{p.custoUnitario.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</Td>
-                    <Td className="font-semibold text-[#90A4AE]">
+                    <Td className="font-semibold text-steel">
                       {p.custoTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
                     </Td>
                     <Td>
@@ -335,7 +335,7 @@ export default function ChapaCalculadora({
                           type="button"
                           onClick={() => salvarNoHistorico(p)}
                           disabled={salvandoId === p.id}
-                          className="inline-flex h-8 items-center gap-1 rounded-xl border border-[#333333] bg-[#212121] px-2 text-xs font-semibold text-[#546E7A] transition hover:bg-[#2a2a2a]"
+                          className="inline-flex h-8 items-center gap-1 rounded-xl border border-line bg-panel px-2 text-xs font-semibold text-muted transition hover:bg-panel-hover"
                         >
                           <Save className="h-3.5 w-3.5" /> Salvar
                         </button>
@@ -362,7 +362,7 @@ export default function ChapaCalculadora({
             </table>
           </div>
           <p className="mt-4 text-right text-base font-bold">
-            Total do lote: <span className="text-[#90A4AE]">{totalLote.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
+            Total do lote: <span className="text-steel">{totalLote.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
           </p>
         </Cartao>
       )}

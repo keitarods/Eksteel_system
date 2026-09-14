@@ -32,16 +32,16 @@ export default async function NovoOrcamentoPage() {
   const clientes = (clientesRaw ?? []).map(mapClienteOrcamento);
 
   return (
-    <main className="min-h-screen bg-[#1e1e1e] px-3 py-5 text-[#ECEFF1] sm:px-6 sm:py-8">
+    <main className="min-h-screen bg-background px-3 py-5 text-foreground sm:px-6 sm:py-8">
       <section className="mx-auto max-w-4xl">
-        <Link href="/orcamentos" className="mb-2 inline-flex items-center gap-2 text-sm font-semibold text-[#90A4AE] transition hover:text-[#ECEFF1]">
+        <Link href="/orcamentos" className="mb-2 inline-flex items-center gap-2 text-sm font-semibold text-steel transition hover:text-foreground">
           <ArrowLeft className="h-4 w-4" />
           Voltar aos orçamentos
         </Link>
-        <p className="text-sm font-semibold text-[#90A4AE]">Orçamentos</p>
+        <p className="text-sm font-semibold text-steel">Orçamentos</p>
         <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Novo orçamento</h1>
 
-        <div className="mt-6 rounded-3xl border border-[#333333] bg-[#212121] p-4 shadow-sm sm:p-6">
+        <div className="mt-6 rounded-xl border border-line bg-panel p-4 shadow-sm sm:p-6">
           <OrcamentoForm usuarioId={user.id} dataHoje={hojeIso()} clientesIniciais={clientes} cnpjsDisponiveis={cnpjs} />
         </div>
       </section>

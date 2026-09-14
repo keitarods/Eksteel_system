@@ -64,15 +64,15 @@ export default async function CalculadoraPage() {
   if (!vinculo || vinculo.papel === "pendente") redirect("/pendente");
 
   return (
-    <main className="min-h-screen bg-[#1e1e1e] px-3 py-5 text-[#ECEFF1] sm:px-6 sm:py-8">
+    <main className="min-h-screen bg-background px-3 py-5 text-foreground sm:px-6 sm:py-8">
       <section className="mx-auto max-w-6xl">
-        <Link href="/app" className="mb-2 inline-flex items-center gap-2 text-sm font-semibold text-[#90A4AE] transition hover:text-[#ECEFF1]">
+        <Link href="/app" className="mb-2 inline-flex items-center gap-2 text-sm font-semibold text-steel transition hover:text-foreground">
           <ArrowLeft className="h-4 w-4" />
           Voltar ao início
         </Link>
-        <p className="text-sm font-semibold text-[#90A4AE]">Calculadora</p>
+        <p className="text-sm font-semibold text-steel">Calculadora</p>
         <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Custos de fabricação</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-[#78909C]">
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
           Precifique chapas cortadas a laser, tubos/perfis, usinagem, soldagem e a composição final de uma peça —
           além de serviços de desenho técnico e cálculo (CAD/CAE) — e mande o resultado direto pra um orçamento.
           Cada módulo tem sua própria aba de Parâmetros, com os valores específicos daquele processo.
@@ -85,14 +85,14 @@ export default async function CalculadoraPage() {
               <Link
                 key={card.href}
                 href={card.href}
-                className="flex flex-col rounded-3xl border border-[#333333] bg-[#212121] p-5 shadow-sm transition hover:bg-[#252525] sm:p-6"
+                className="flex flex-col rounded-xl border border-line bg-panel p-5 shadow-sm transition hover:bg-[#252525] sm:p-6"
               >
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#546E7A]/20 text-[#90A4AE]">
+                <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-accent/20 text-steel">
                   <Icone className="h-5 w-5" />
                 </div>
                 <h2 className="mt-4 text-lg font-bold">{card.titulo}</h2>
-                <p className="mt-2 text-sm leading-6 text-[#78909C]">{card.descricao}</p>
-                <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-[#546E7A]">
+                <p className="mt-2 text-sm leading-6 text-muted">{card.descricao}</p>
+                <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-muted">
                   Acessar <ArrowRight className="h-4 w-4" />
                 </span>
               </Link>

@@ -69,8 +69,8 @@ export default function EmpresaCnpjsEditor({
 
   return (
     <Cartao>
-      <p className="text-sm font-semibold text-[#90A4AE]">CNPJs da empresa</p>
-      <p className="mt-1 text-xs text-[#78909C]">
+      <p className="text-sm font-semibold text-steel">CNPJs da empresa</p>
+      <p className="mt-1 text-xs text-muted">
         Cada orçamento novo escolhe um desses CNPJs (ex: MEI do Matheus, MEI do Enyo) pra aparecer no PDF.
       </p>
 
@@ -78,26 +78,26 @@ export default function EmpresaCnpjsEditor({
 
       <div className="mt-4 flex flex-col gap-2">
         {linhas.map((linha) => (
-          <div key={linha.id} className="flex flex-wrap items-center gap-2 rounded-2xl border border-[#2a2a2a] bg-[#141414] p-3">
+          <div key={linha.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-panel-hover bg-background p-3">
             <input
               type="text"
               value={linha.label}
               onChange={(e) => atualizarCampo(linha.id, "label", e.target.value)}
               placeholder="Nome (ex: Matheus MEI)"
-              className="h-9 w-44 rounded-xl border border-[#333333] bg-[#212121] px-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+              className="h-9 w-44 rounded-xl border border-line bg-panel px-3 text-sm text-foreground outline-none focus:border-accent"
             />
             <input
               type="text"
               value={linha.cnpj}
               onChange={(e) => atualizarCampo(linha.id, "cnpj", e.target.value)}
               placeholder="00.000.000/0001-00"
-              className="h-9 flex-1 min-w-40 rounded-xl border border-[#333333] bg-[#212121] px-3 text-sm text-[#ECEFF1] outline-none focus:border-[#546E7A]"
+              className="h-9 flex-1 min-w-40 rounded-xl border border-line bg-panel px-3 text-sm text-foreground outline-none focus:border-accent"
             />
             <button
               type="button"
               onClick={() => salvarLinha(linha)}
               disabled={linha.salvando}
-              className="inline-flex h-9 items-center gap-1 rounded-xl border border-[#333333] bg-[#212121] px-3 text-xs font-semibold text-[#546E7A] transition hover:bg-[#2a2a2a] disabled:opacity-50"
+              className="inline-flex h-9 items-center gap-1 rounded-xl border border-line bg-panel px-3 text-xs font-semibold text-muted transition hover:bg-panel-hover disabled:opacity-50"
             >
               <Save className="h-3.5 w-3.5" /> {linha.salvando ? "Salvando..." : "Salvar"}
             </button>
@@ -111,7 +111,7 @@ export default function EmpresaCnpjsEditor({
             </button>
           </div>
         ))}
-        {linhas.length === 0 && <p className="text-sm text-[#78909C]">Nenhum CNPJ cadastrado ainda.</p>}
+        {linhas.length === 0 && <p className="text-sm text-muted">Nenhum CNPJ cadastrado ainda.</p>}
       </div>
 
       <div className="mt-3">

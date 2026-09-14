@@ -55,14 +55,14 @@ export default function UsinagemParametrosForm({
     <div className="flex flex-col gap-5">
       <FeedbackBloco mensagem={mensagem} erro={erro} />
 
-      <div className="rounded-2xl border border-[#2a2a2a] bg-[#141414] p-3 text-xs text-[#78909C]">
+      <div className="rounded-lg border border-panel-hover bg-background p-3 text-xs text-muted">
         Preço aqui é específico de barra/tarugo pra usinagem — diferente do preço de chapa, já que o estoque em
         barra passa por laminação a quente/trefilação e tem rendimento menor.
       </div>
 
       {GRUPOS.map((grupo) => (
         <Cartao key={grupo.titulo}>
-          <p className="mb-3 text-sm font-semibold text-[#90A4AE]">{grupo.titulo}</p>
+          <p className="mb-3 text-sm font-semibold text-steel">{grupo.titulo}</p>
           <div className="grid gap-4 sm:grid-cols-3">
             {grupo.chaves.map((chave) => (
               <Campo

@@ -27,13 +27,13 @@ export default async function ConfiguracoesOrcamentosPage() {
   ]);
 
   return (
-    <main className="min-h-screen bg-[#1e1e1e] px-3 py-5 text-[#ECEFF1] sm:px-6 sm:py-8">
+    <main className="min-h-screen bg-background px-3 py-5 text-foreground sm:px-6 sm:py-8">
       <section className="mx-auto max-w-2xl">
-        <Link href="/orcamentos" className="mb-2 inline-flex items-center gap-2 text-sm font-semibold text-[#90A4AE] transition hover:text-[#ECEFF1]">
+        <Link href="/orcamentos" className="mb-2 inline-flex items-center gap-2 text-sm font-semibold text-steel transition hover:text-foreground">
           <ArrowLeft className="h-4 w-4" />
           Voltar aos orçamentos
         </Link>
-        <p className="text-sm font-semibold text-[#90A4AE]">Orçamentos</p>
+        <p className="text-sm font-semibold text-steel">Orçamentos</p>
         <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Dados da empresa</h1>
 
         <div className="mt-6 flex flex-col gap-5">
