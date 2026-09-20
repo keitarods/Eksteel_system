@@ -38,6 +38,9 @@ import {
   YAxis,
 } from "recharts";
 import { createClient } from "@/lib/supabase/client";
+import { calcularDisponibilidade, type Material, type Componente } from "@/lib/estoque/disponibilidade";
+import EstoqueMateriais from "@/components/dashboard/estoque-materiais";
+import KanbanModulo from "@/components/dashboard/kanban-modulo";
 import ProdutoSiteEditor from "@/components/dashboard/produto-site-editor";
 import RoscaProdutos from "@/components/dashboard/rosca-produtos";
 import RelatoriosModulo from "@/components/dashboard/relatorios-modulo";
@@ -51,6 +54,7 @@ type AbaDashboard =
   | "vendas"
   | "cadastro"
   | "estoque"
+  | "atividades"
   | "compras"
   | "relatorios"
   | "balancete"
@@ -147,6 +151,7 @@ type Produto = {
 };
 
 type Venda = {
+  materiaPrimaConsumo?: { materia_prima_id: string; nome: string; quantidade: number; necessario: number; faltante: number; custo_unitario?: number | null; custo_estimado?: boolean }[];
   cmvTotal?: number | null;
   cmvEstimado?: boolean;
   cmvComponentes?: { produto_id: string; quantidade: number; custo_unitario: number | null }[] | null;
@@ -193,6 +198,9 @@ type Cliente = {
 };
 
 type MateriaPrima = {
+  custoMedio: number | null;
+  custoMedioEstimado: boolean;
+  influenciaSaldo: boolean;
   id: string;
   codigo: string;
   nome: string;
@@ -237,14 +245,6 @@ type ItemFabricacao = {
   precoTotal: number;
 };
 
-type ItemFabricacaoRascunho = {
-  componenteId: string;
-  nomePeca: string;
-  qtdPc: number;
-  linkCompra: string;
-  fornecedorNome: string;
-  precoUnitario: string;
-};
 
 type PedidoFabricacao = {
   integradoCmv?: boolean;
@@ -267,6 +267,8 @@ type MembroEmpresa = {
 };
 
 type PedidoCompra = {
+  pecas: string[];
+  estoqueIntegrado: boolean;
   id: string;
   fornecedorId: string;
   fornecedorNome: string;
@@ -294,7 +296,7 @@ type ItemPedidoCompra = {
 };
 
 // Linha em edição (form) — valores como string, igual ao resto do formulário,
-// parseados só na hora de calcular/salvar. materiaPrimaId vazio = item avulso
+// parseados só na hora de calcular/salvar. Toda linha precisa de matéria-prima
 // (descrição livre, sem vínculo com o cadastro de matérias-primas).
 type LinhaItemPedido = { id: string; materiaPrimaId: string; descricao: string; quantidade: string; valorUnitario: string };
 
@@ -352,6 +354,7 @@ const TODAS_ABAS = [
   { id: "vendas", label: "Vendas", icon: ShoppingCart },
   { id: "cadastro", label: "Cadastro", icon: ClipboardList },
   { id: "estoque", label: "Estoque", icon: Archive },
+  { id: "atividades", label: "Atividades", icon: ClipboardList },
   { id: "compras", label: "Compras", icon: PackagePlus },
   { id: "relatorios", label: "Relatórios", icon: BarChart3 },
   { id: "balancete", label: "Balancete", icon: Scale },
@@ -496,8 +499,9 @@ export default function DashboardTabs({
           <CadastroModulo usuarioId={usuarioId} isAdmin={isAdmin} dataHoje={dataHoje} />
         )}
         {abaAtiva === "estoque" && (
-          <EstoqueModulo usuarioId={usuarioId} />
+          <EstoqueMateriais />
         )}
+        {abaAtiva === "atividades" && <KanbanModulo />}
         {abaAtiva === "compras" && (
           <ComprasModulo usuarioId={usuarioId} dataHoje={dataHoje} />
         )}
@@ -521,6 +525,8 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [balancete, setBalancete] = useState<ItemBalancete[]>([]);
   const [kits, setKits] = useState<Kit[]>([]);
+  const [materiaisEstoque, setMateriaisEstoque] = useState<Material[]>([]);
+  const [componentesEstoque, setComponentesEstoque] = useState<Componente[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [termoBusca, setTermoBusca] = useState("");
@@ -539,12 +545,14 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
     async function carregar() {
       const supabase = createClient();
       try {
-        const [v, d, p, bl, kt] = await Promise.all([
+        const [v, d, p, bl, kt, mp, cp] = await Promise.all([
           buscarTodasLinhas(supabase, "vendas"),
           buscarTodasLinhas(supabase, "despesas"),
           buscarTodasLinhas(supabase, "produtos"),
           buscarTodasLinhas(supabase, "balancete"),
           buscarKitsComItens(supabase),
+          buscarTodasLinhas(supabase, "saldos_materias_primas"),
+          buscarTodasLinhas(supabase, "componentes_produto"),
         ]);
         if (ativo) {
           setVendas(v.map(mapVenda).filter((i) => i.data <= dataHoje));
@@ -552,6 +560,8 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
           setProdutos(p.map(mapProduto));
           setBalancete(bl.map(mapItemBalancete).filter((i) => i.data <= dataHoje));
           setKits(kt.map(mapKit));
+          setMateriaisEstoque(mp as unknown as Material[]);
+          setComponentesEstoque(cp as unknown as Componente[]);
         }
       } catch (error) {
         if (ativo) setErroLeitura(error instanceof Error ? error.message : "Falha ao carregar indicadores.");
@@ -657,9 +667,10 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
   const margemBruta = resumo.margemBruta;
   const margemLiquida = resumo.margem;
   const estoque = posicaoEstoque(baseGerencial, vendasApuradas, dataHoje);
-  const estoqueMovimentos = estoque.itens.map((p) => ({ ...p, saldoReal: p.estoqueAtual }));
+  const produtosDisponibilidade = produtos.map(p => ({ ...p, estoque_atual: p.estoqueAtual }));
+  const estoqueMovimentos = estoque.itens.map((p) => ({ ...p, saldoReal: calcularDisponibilidade([{ produto_id: p.id, quantidade: 1 }], produtosDisponibilidade, componentesEstoque, materiaisEstoque).saldo }));
   const capitalTotalEstoque = estoque.total;
-  const totalUnidadesEstoque = estoqueMovimentos.reduce((s, p) => s + p.saldoReal, 0);
+  const produtosDisponiveis = estoqueMovimentos.filter(p => p.ativo && p.saldoReal > 0).length;
   const produtosAbaixoMinimo = estoqueMovimentos.filter((p) => p.ativo && p.saldoReal <= p.estoqueMinimo);
 
   // ─── Chart data ───
@@ -722,10 +733,11 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
       <DashSecao titulo="Indicadores de Estoque" />
       <div className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <KpiCard titulo="Estoque atual estimado" valor={formatarMoeda(capitalTotalEstoque)} destaque />
-          <KpiCard titulo="Unidades em estoque" valor={String(totalUnidadesEstoque)} />
+          <KpiCard titulo="Valor dos saldos físicos de produtos" valor={formatarMoeda(capitalTotalEstoque)} destaque />
+          <KpiCard titulo="Produtos com disponibilidade" valor={String(produtosDisponiveis)} />
           <KpiCard titulo="Produtos abaixo do mínimo" valor={String(produtosAbaixoMinimo.length)} alerta={produtosAbaixoMinimo.length > 0} />
         </div>
+        <p className="mt-3 text-xs text-muted">A disponibilidade considera a matéria-prima dos produtos compostos. Saldos físicos anteriores ficam separados da capacidade de montagem; consulte os alertas e ajustes na aba Estoque.</p>
         {produtosAbaixoMinimo.length > 0 && (
           <div className="mt-4 rounded-lg border border-amber-800/50 bg-amber-900/20 p-4">
             <p className="text-sm font-semibold text-amber-400">
@@ -1158,7 +1170,8 @@ function VendasModulo({
       desconto: "0",
       observacao: "",
     });
-    setMensagem("Venda registrada com sucesso.");
+    const faltantes = (data?.materia_prima_consumo ?? []).filter((i: { faltante: number }) => i.faltante > 0);
+    setMensagem(faltantes.length ? "Venda registrada. Atenção: há itens de apoio faltantes; abra os detalhes da venda." : "Venda registrada com sucesso.");
   }
 
   async function handleExcluir(id: string) {
@@ -1509,6 +1522,11 @@ function VendasModulo({
                   </div>
                 ) : null;
               })()}
+              {!!vendaSelecionada.materiaPrimaConsumo?.length && <details className="my-3 rounded-lg border border-line p-3 text-sm">
+                <summary className="cursor-pointer text-amber-400">Matérias-primas consumidas / itens faltantes</summary>
+                <ul className="mt-2 space-y-1">{vendaSelecionada.materiaPrimaConsumo.map(item => <li key={item.materia_prima_id}>{item.nome}: {item.quantidade} consumidos de {item.necessario} necessários{item.faltante > 0 ? ` • Faltaram ${item.faltante}` : ""} • Custo por unidade: {formatarMoeda(item.custo_unitario ?? null)}</li>)}</ul>
+              </details>}
+              <LinhaDetalhe label="CMV registrado na venda" valor={`${formatarMoeda(vendaSelecionada.cmvTotal ?? null)}${vendaSelecionada.cmvEstimado ? " (estimado)" : ""}`} />
               <LinhaDetalhe label="Valor unitário" valor={formatarMoeda(vendaSelecionada.valorUnitario)} />
               <LinhaDetalhe label="Subtotal bruto" valor={formatarMoeda(vendaSelecionada.valorUnitario * vendaSelecionada.quantidade)} />
               <LinhaDetalhe label="Desconto" valor={`- ${formatarMoeda(vendaSelecionada.desconto)}`} alerta={vendaSelecionada.desconto > 0} />
@@ -1564,7 +1582,7 @@ function CadastroModulo({
       const supabase = createClient();
       const [{ data: p }, { data: mp }, { data: cl }, { data: fo }, { data: kt }] = await Promise.all([
         supabase.from("produtos").select("*").order("nome"),
-        supabase.from("materias_primas").select("*").eq("ativo", true).order("nome"),
+        supabase.from("materias_primas").select("*").order("nome"),
         supabase.from("clientes").select("*").order("nome"),
         supabase.from("fornecedores").select("*").order("nome"),
         supabase.from("kits").select("id, nome, descricao, kit_itens(id, produto_id, quantidade, produtos(nome, codigo))").order("nome"),
@@ -1859,6 +1877,17 @@ function ProdutosSubModulo({
   });
 
   const componentesAtivos = editandoId ? compEdicao : compRascunho;
+  function custoPelaComposicao(componentes: { materiaPrimaId: string; quantidade: number }[]): number | null {
+    if (!componentes.length) return null;
+    let total: number | null = null;
+    for (const c of componentes) {
+      const custo = materiasPrimas.find(m => m.id === c.materiaPrimaId)?.custoMedio;
+      if (c.quantidade <= 0) return null;
+      if (custo != null) total = (total ?? 0) + c.quantidade * custo;
+    }
+    return total;
+  }
+
 
   return (
     <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
@@ -1877,7 +1906,7 @@ function ProdutosSubModulo({
           <div className="sm:col-span-2">
             <CampoCadastro label="Categoria" value={form.categoria} onChange={(v) => setForm((f) => ({ ...f, categoria: v }))} placeholder="Ex: Patins, Estrutura..." />
           </div>
-          <CampoCadastro label="Custo" value={form.custo} onChange={(v) => setForm((f) => ({ ...f, custo: v }))} placeholder="0,00" />
+          {componentesAtivos.length ? <div className="rounded-lg border border-line p-3 text-sm"><span className="block text-muted">Custo pela composição</span><strong>{formatarMoeda(custoPelaComposicao(componentesAtivos))}</strong><small className="block text-muted">Calculado pelo consumo de cada matéria-prima × seu custo médio. Inclui itens de apoio.</small></div> : <CampoCadastro label="Custo cadastral (produto sem composição)" value={form.custo} onChange={(v) => setForm((f) => ({ ...f, custo: v }))} placeholder="0,00" />}
           <CampoCadastro label="Preço de venda sugerido" value={form.precoVenda} onChange={(v) => setForm((f) => ({ ...f, precoVenda: v }))} placeholder="0,00" />
           <CampoCadastro label="Estoque mínimo" value={form.estoqueMinimo} onChange={(v) => setForm((f) => ({ ...f, estoqueMinimo: v }))} placeholder="0" />
           <label className="flex min-h-11 items-center gap-3 rounded-lg border border-line bg-panel px-4 py-3 text-sm sm:col-span-2">
@@ -1931,7 +1960,7 @@ function ProdutosSubModulo({
                   onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
                   className="h-10 w-full rounded-xl border border-line bg-panel px-3 text-sm text-foreground outline-none focus:border-accent">
                   <option value="">Selecionar matéria-prima...</option>
-                  {materiasPrimas.map((mp) => (
+                  {materiasPrimas.filter(mp => mp.ativo).map((mp) => (
                     <option key={mp.id} value={mp.id}>{mp.codigo ? `[${mp.codigo}] ` : ""}{mp.nome}</option>
                   ))}
                 </select>
@@ -2057,7 +2086,7 @@ function ProdutosSubModulo({
             <LinhaDetalhe label="Código" valor={produtoSelecionado.codigo || "-"} />
             <LinhaDetalhe label="Categoria" valor={produtoSelecionado.categoria || "-"} />
             <LinhaDetalhe label="Publicação automática no site" valor={produtoSelecionado.ativo && produtoSelecionado.publicarSite ? "Habilitada" : "Desabilitada"} />
-            <LinhaDetalhe label="Custo" valor={produtoSelecionado.custo > 0 ? formatarMoeda(produtoSelecionado.custo) : "—"} />
+            <LinhaDetalhe label={componentesDetalhe.length ? "Custo pela composição" : "Custo cadastral (sem composição)"} valor={carregandoDetalhe ? "Carregando..." : componentesDetalhe.length ? formatarMoeda(custoPelaComposicao(componentesDetalhe)) : produtoSelecionado.custo > 0 ? formatarMoeda(produtoSelecionado.custo) : "Sem custo"} />
             <LinhaDetalhe label="Preço de venda" valor={produtoSelecionado.precoVenda > 0 ? formatarMoeda(produtoSelecionado.precoVenda) : "—"} destaque />
             <LinhaDetalhe label="Estoque mínimo" valor={produtoSelecionado.estoqueMinimo} />
             <LinhaDetalhe
@@ -2528,7 +2557,7 @@ function MateriasPrimasSubModulo({
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [termoBusca, setTermoBusca] = useState("");
   const [form, setForm] = useState(() => ({
-    codigo: proximoCodigo(materiasPrimas, "MP-"), nome: "", unidade: "un", linkCompra: "", ativo: true,
+    codigo: proximoCodigo(materiasPrimas, "MP-"), nome: "", unidade: "un", linkCompra: "", ativo: true, influenciaSaldo: true,
   }));
 
   useEffect(() => {
@@ -2538,7 +2567,7 @@ function MateriasPrimasSubModulo({
   }, [materiasPrimas, editandoId]);
 
   function limparForm() {
-    setForm({ codigo: proximoCodigo(materiasPrimas, "MP-"), nome: "", unidade: "un", linkCompra: "", ativo: true });
+    setForm({ codigo: proximoCodigo(materiasPrimas, "MP-"), nome: "", unidade: "un", linkCompra: "", ativo: true, influenciaSaldo: true });
     setEditandoId(null);
   }
 
@@ -2549,6 +2578,7 @@ function MateriasPrimasSubModulo({
       unidade: mp.unidade,
       linkCompra: mp.linkCompra,
       ativo: mp.ativo,
+      influenciaSaldo: mp.influenciaSaldo,
     });
     setEditandoId(mp.id);
   }
@@ -2571,6 +2601,7 @@ function MateriasPrimasSubModulo({
       unidade: form.unidade.trim() || "un",
       link_compra: form.linkCompra.trim(),
       ativo: form.ativo,
+      influencia_saldo: form.influenciaSaldo,
     };
     if (editandoId) {
       const { error } = await supabase.from("materias_primas").update(payload).eq("id", editandoId);
@@ -2578,7 +2609,7 @@ function MateriasPrimasSubModulo({
       if (error) { setErro(error.message); return; }
       setMateriasPrimas((prev) => prev.map((m) =>
         m.id === editandoId
-          ? { ...m, ...{ codigo: payload.codigo, nome: payload.nome, unidade: payload.unidade, linkCompra: payload.link_compra, ativo: payload.ativo } }
+          ? { ...m, ...{ codigo: payload.codigo, nome: payload.nome, unidade: payload.unidade, linkCompra: payload.link_compra, ativo: payload.ativo, influenciaSaldo: payload.influencia_saldo } }
           : m
       ));
       setMensagem("Matéria-prima atualizada.");
@@ -2631,6 +2662,16 @@ function MateriasPrimasSubModulo({
               className="h-4 w-4 rounded border-line accent-accent" />
             <span className="font-semibold">Ativo</span>
           </label>
+          <div className="sm:col-span-2">
+            <label htmlFor="materia-prima-regra-saldo" className="mb-1 block text-sm font-medium">Em caso de falta deste item</label>
+            <select id="materia-prima-regra-saldo" value={form.influenciaSaldo ? "limitar" : "alertar"}
+              onChange={e => setForm(f => ({ ...f, influenciaSaldo: e.target.value === "limitar" }))}
+              className="h-11 w-full rounded-lg border border-line bg-background px-3 text-sm">
+              <option value="limitar">Limitar o saldo dos produtos e kits e gerar alerta</option>
+              <option value="alertar">Somente gerar alerta, sem limitar o saldo</option>
+            </select>
+            <p className="mt-2 text-xs text-muted">Escolha para qualquer matéria-prima, como embalagem, plástico ou parafuso. A regra vale para todos os produtos e kits que usam este item e pode ser alterada ao editar o cadastro. O item continua no cálculo do custo e seu estoque disponível é consumido nas vendas.</p>
+          </div>
         </div>
         <div className="mt-5 flex gap-3">
           <button type="submit" disabled={salvando}
@@ -2674,7 +2715,7 @@ function MateriasPrimasSubModulo({
                   {filtradas.map((m) => (
                     <tr key={m.id} className="border-t border-panel-hover">
                       <Td className="text-xs text-muted">{m.codigo || "-"}</Td>
-                      <Td className="font-semibold">{m.nome}</Td>
+                      <Td className="font-semibold">{m.nome}{!m.ativo && <span className="ml-2 inline-block rounded-full bg-amber-400/10 px-2 py-0.5 text-xs font-medium text-amber-400">Inativa</span>}<small className="block text-muted">{m.influenciaSaldo ? "Influencia o saldo" : "Somente alerta"}</small></Td>
                       <Td>{m.unidade}</Td>
                       <Td>
                         {m.linkCompra ? (
@@ -2981,308 +3022,6 @@ function FornecedoresSubModulo({
 
 // ─── Estoque ──────────────────────────────────────────────────────────────────
 
-function EstoqueModulo({ usuarioId }: { usuarioId: string }) {
-  const [produtos, setProdutos] = useState<Produto[]>([]);
-  const [vendas, setVendas] = useState<Venda[]>([]);
-  const [pedidosFabricacao, setPedidosFabricacao] = useState<PedidoFabricacao[]>([]);
-  const [reposicoes, setReposicoes] = useState<{id:string;produtoId:string;quantidade:number}[]>([]);
-  const [kits, setKits] = useState<Kit[]>([]);
-  const [carregando, setCarregando] = useState(true);
-  const [termoBusca, setTermoBusca] = useState("");
-  const [erroLeitura, setErroLeitura] = useState("");
-
-  async function carregar() {
-    setCarregando(true);
-    const supabase = createClient();
-    try {
-      const [prod, v, pf, kt, rp] = await Promise.all([
-        buscarTodasLinhas(supabase, "produtos"), buscarTodasLinhas(supabase, "vendas"),
-        buscarTodasLinhas(supabase, "pedidos_fabricacao"),
-        buscarKitsComItens(supabase),
-        buscarTodasLinhas(supabase, "reposicoes_produtos"),
-      ]);
-      setReposicoes(rp.map(i=>({id:String(i.id),produtoId:String(i.produto_id),quantidade:Number(i.quantidade)})));
-      setProdutos(prod.map(mapProduto)); setVendas(v.map(mapVenda));
-      setPedidosFabricacao(pf.map(mapPedidoFabricacao)); setKits(kt.map(mapKit)); setErroLeitura("");
-    } catch (error) { setErroLeitura(error instanceof Error ? error.message : "Falha ao carregar estoque."); }
-    finally { setCarregando(false); }
-  }
-
-  useEffect(() => {
-    let ativo = true;
-    carregar().then(() => { if (!ativo) return; });
-    return () => { ativo = false; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [usuarioId]);
-
-  const hojeEstoque = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
-  // Saídas por produto, considerando vendas diretas e o consumo indireto de vendas de kit.
-  const saidasPorProduto: Record<string, number> = {};
-  const baseEstoque = { produtos, vendas, fabricacoes: pedidosFabricacao, kits, despesas: [] };
-  const apuradas = prepararVendas(baseEstoque);
-  apuradas.filter(v=>v.data<=hojeEstoque).forEach(v=>{for(const item of v.consumo ?? []) saidasPorProduto[item.produtoId]=(saidasPorProduto[item.produtoId]??0)+item.quantidade;});
-
-  const posicao = posicaoEstoque(baseEstoque, apuradas, hojeEstoque);
-  // Saldo atual cadastrado inclui as movimentações e ajustes existentes.
-  const movimentos = produtos.filter((p) => p.ativo || p.estoqueAtual !== 0).map((p) => {
-    const ordens = pedidosFabricacao.filter((pf) => pf.produtoId === p.id && pf.data <= hojeEstoque);
-    const entradas = ordens.reduce((s, pf) => s + pf.qtdFabricada, 0) + reposicoes.filter(r=>r.produtoId===p.id && !pedidosFabricacao.some(f=>f.id===r.id)).reduce((s,r)=>s+r.quantidade,0);
-    const custoUnitFab = posicao.itens.find((i) => i.id === p.id)?.custo ?? null;
-    const saidas = saidasPorProduto[p.id] ?? 0;
-    const saldo = p.estoqueAtual;
-    return { produto: p, entradas, saidas, saldo, custoUnitFab, capital: posicao.itens.find((i) => i.id === p.id)?.valor ?? null };
-  });
-
-  const movimentosFiltrados = movimentos.filter((m) => {
-    const q = termoBusca.toLowerCase();
-    return !q || m.produto.nome.toLowerCase().includes(q) || m.produto.codigo.toLowerCase().includes(q);
-  });
-
-  const capitalTotal = posicao.total;
-  const abaixoMinimo = movimentos.filter((m) => m.produto.ativo && m.saldo <= m.produto.estoqueMinimo);
-  const totalUnidades = movimentos.reduce((s, m) => s + m.saldo, 0);
-
-  // Quantos kits dá pra montar com o estoque atual: o gargalo é o item com menor saldo relativo à quantidade exigida.
-  const kitsComEstoque = kits.map((kit) => {
-    const quantidadeMontavel = kit.itens.length === 0 ? 0 : Math.min(
-      ...kit.itens.map((it) => {
-        const saldoItem = movimentos.find((m) => m.produto.id === it.produtoId)?.saldo ?? 0;
-        return it.quantidade > 0 ? Math.max(0, Math.floor(saldoItem / it.quantidade)) : 0;
-      })
-    );
-    return { kit, quantidadeMontavel };
-  });
-
-  const dadosGraficoEstoque = movimentos.map((m) => ({
-    rotulo: m.produto.codigo || truncarRotulo(m.produto.nome, 10),
-    nome: m.produto.nome,
-    saldo: m.saldo,
-    abaixo: m.saldo <= m.produto.estoqueMinimo,
-  }));
-  const dadosGraficoKits = kitsComEstoque.map(({ kit, quantidadeMontavel }) => ({
-    rotulo: truncarRotulo(kit.nome, 10),
-    nome: kit.nome,
-    quantidade: quantidadeMontavel,
-    indisponivel: quantidadeMontavel <= 0,
-  }));
-
-  if (carregando) return <EstadoCarregando texto="Carregando estoque..." />;
-
-  if (erroLeitura) return <p role="alert" className="p-5 text-red-300">{erroLeitura} Nenhum saldo parcial foi exibido.</p>;
-
-  return (
-    <section className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
-      <SectionHeader
-        tag="Estoque"
-        titulo="Inventário de produtos"
-        descricao="Saldo atual cadastrado. Valor pelo custo médio de reposição ou pelo custo cadastral estimado; consulte a metodologia em Relatórios."
-      />
-
-      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <KpiCard titulo="Unidades em estoque" valor={String(totalUnidades)} />
-        <KpiCard titulo="Abaixo do mínimo" valor={String(abaixoMinimo.length)} alerta={abaixoMinimo.length > 0} />
-        <KpiCard titulo="Capital em estoque" valor={formatarMoeda(capitalTotal)} destaque />
-      </div>
-
-      <div className="mt-6 grid gap-5 lg:grid-cols-2">
-        <div className="rounded-xl border border-line bg-surface p-4 sm:p-6">
-          <p className="text-sm font-semibold text-steel">Itens avulsos</p>
-          <h3 className="mt-1 text-lg font-bold">Saldo por produto</h3>
-          {dadosGraficoEstoque.length > 0 ? (
-            <div className="mt-4 max-h-80 overflow-y-auto">
-              <div style={{ height: Math.max(dadosGraficoEstoque.length * 34, 120) }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={dadosGraficoEstoque} layout="vertical" barCategoryGap="35%" margin={{ top: 4, right: 24, bottom: 4, left: 4 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" horizontal={false} />
-                    <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: "#78909C" }} axisLine={{ stroke: "#333333" }} tickLine={false} />
-                    <YAxis type="category" dataKey="rotulo" width={64} tick={{ fontSize: 11, fill: "#90A4AE" }} axisLine={{ stroke: "#333333" }} tickLine={false} />
-                    <Tooltip
-                      formatter={(v) => [`${Number(v)} un.`, "Saldo"]}
-                      labelFormatter={(_, payload) => payload?.[0]?.payload?.nome ?? ""}
-                      contentStyle={{ backgroundColor: "#181818", border: "1px solid #333333", borderRadius: 12 }}
-                      labelStyle={{ color: "#ECEFF1", fontWeight: 600, marginBottom: 4 }}
-                      itemStyle={{ color: "#90A4AE" }}
-                      cursor={{ fill: "#2a2a2a" }}
-                    />
-                    <Bar dataKey="saldo" radius={[0, 4, 4, 0]} maxBarSize={20}>
-                      {dadosGraficoEstoque.map((d, i) => (
-                        <Cell key={i} fill={d.abaixo ? "#C62828" : "#1565C0"} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          ) : (
-            <div className="mt-4 py-10 text-center text-sm text-muted">Nenhum produto ativo cadastrado.</div>
-          )}
-        </div>
-
-        <div className="rounded-xl border border-line bg-surface p-4 sm:p-6">
-          <p className="text-sm font-semibold text-steel">Kits</p>
-          <h3 className="mt-1 text-lg font-bold">Quantidade montável</h3>
-          {dadosGraficoKits.length > 0 ? (
-            <div className="mt-4 max-h-80 overflow-y-auto">
-              <div style={{ height: Math.max(dadosGraficoKits.length * 34, 120) }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={dadosGraficoKits} layout="vertical" barCategoryGap="35%" margin={{ top: 4, right: 24, bottom: 4, left: 4 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" horizontal={false} />
-                    <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: "#78909C" }} axisLine={{ stroke: "#333333" }} tickLine={false} />
-                    <YAxis type="category" dataKey="rotulo" width={90} tick={{ fontSize: 11, fill: "#90A4AE" }} axisLine={{ stroke: "#333333" }} tickLine={false} />
-                    <Tooltip
-                      formatter={(v) => [`${Number(v)} kit(s)`, "Montável"]}
-                      labelFormatter={(_, payload) => payload?.[0]?.payload?.nome ?? ""}
-                      contentStyle={{ backgroundColor: "#181818", border: "1px solid #333333", borderRadius: 12 }}
-                      labelStyle={{ color: "#ECEFF1", fontWeight: 600, marginBottom: 4 }}
-                      itemStyle={{ color: "#90A4AE" }}
-                      cursor={{ fill: "#2a2a2a" }}
-                    />
-                    <Bar dataKey="quantidade" radius={[0, 4, 4, 0]} maxBarSize={20}>
-                      {dadosGraficoKits.map((d, i) => (
-                        <Cell key={i} fill={d.indisponivel ? "#C62828" : "#1565C0"} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          ) : (
-            <div className="mt-4 py-10 text-center text-sm text-muted">Nenhum kit cadastrado.</div>
-          )}
-        </div>
-      </div>
-
-      <div className="mt-5 flex items-center gap-3">
-        <div className="relative flex-1 sm:max-w-64">
-          <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-steel" />
-          <input
-            type="search"
-            value={termoBusca}
-            onChange={(e) => setTermoBusca(e.target.value)}
-            className="h-11 w-full rounded-lg border border-line bg-background pl-11 pr-4 text-sm text-foreground outline-none placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent-dark"
-            placeholder="Buscar produto"
-          />
-        </div>
-        <button
-          type="button"
-          onClick={carregar}
-          className="inline-flex h-11 items-center gap-2 rounded-lg border border-line bg-panel px-4 text-sm font-semibold text-muted transition hover:bg-panel-hover"
-        >
-          <RefreshCw className="h-4 w-4" />
-          Atualizar
-        </button>
-      </div>
-
-      <div className="mt-4 overflow-hidden rounded-xl border border-line">
-        {movimentosFiltrados.length > 0 ? (
-          <div className="overflow-auto">
-            <table className="min-w-[820px] w-full bg-panel text-left text-sm">
-              <thead className="bg-surface text-steel">
-                <tr>
-                  <Th>Código</Th>
-                  <Th>Produto</Th>
-                  <Th>Entradas</Th>
-                  <Th>Saídas</Th>
-                  <Th>Saldo</Th>
-                  <Th>Mínimo</Th>
-                  <Th>Custo unit.</Th>
-                  <Th>Capital</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {movimentosFiltrados.map(({ produto: p, entradas, saidas, saldo, custoUnitFab, capital }) => {
-                  const abaixo = saldo <= p.estoqueMinimo;
-                  return (
-                    <tr key={p.id} className={`border-t border-panel-hover ${abaixo ? "bg-red-900/10" : ""}`}>
-                      <Td className="text-xs text-muted">{p.codigo || "-"}</Td>
-                      <Td className="font-semibold">{p.nome}</Td>
-                      <Td>
-                        <span className="font-semibold text-emerald-400">{entradas}</span>
-                      </Td>
-                      <Td>
-                        <span className="font-semibold text-red-600">{saidas}</span>
-                      </Td>
-                      <Td>
-                        <span className={`font-bold text-base ${abaixo ? "text-red-600" : "text-steel"}`}>
-                          {saldo}
-                        </span>
-                        {abaixo && (
-                          <span className="ml-1.5 rounded-full bg-red-900/20 px-1.5 py-0.5 text-xs font-semibold text-red-400">
-                            baixo
-                          </span>
-                        )}
-                      </Td>
-                      <Td className="text-muted">{p.estoqueMinimo}</Td>
-                      <Td>{custoUnitFab !== null && custoUnitFab > 0 ? formatarMoeda(custoUnitFab) : <span className="text-steel">—</span>}</Td>
-                      <Td className="font-semibold text-foreground">{formatarMoeda(capital)}</Td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-              <tfoot className="border-t-2 border-line bg-surface">
-                <tr>
-                  <td colSpan={4} className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted">
-                    Total
-                  </td>
-                  <td className="px-4 py-3 font-bold text-steel">{totalUnidades}</td>
-                  <td />
-                  <td />
-                  <td className="px-4 py-3 font-bold text-steel">{formatarMoeda(capitalTotal)}</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        ) : (
-          <EstadoTabelaVazia texto="Nenhum produto ativo cadastrado." />
-        )}
-      </div>
-
-      {kits.length > 0 && (
-        <div className="mt-8">
-          <p className="text-sm font-semibold text-steel">Kits</p>
-          <h3 className="mt-1 text-xl font-bold">Quantidade montável com o estoque atual</h3>
-          <p className="mt-0.5 text-xs text-muted">
-            Calculado pelo item do kit com menor saldo disponível em relação à quantidade exigida.
-          </p>
-          <div className="mt-4 overflow-hidden rounded-xl border border-line">
-            <div className="overflow-auto">
-              <table className="min-w-[560px] w-full bg-panel text-left text-sm">
-                <thead className="bg-surface text-steel">
-                  <tr>
-                    <Th>Kit</Th>
-                    <Th>Composição</Th>
-                    <Th>Dá pra montar</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {kitsComEstoque.map(({ kit, quantidadeMontavel }) => (
-                    <tr key={kit.id} className={`border-t border-panel-hover ${quantidadeMontavel <= 0 ? "bg-red-900/10" : ""}`}>
-                      <Td className="font-semibold">{kit.nome}</Td>
-                      <Td className="text-xs text-muted">
-                        {kit.itens.map((it, i) => (
-                          <span key={it.id}>
-                            {i > 0 && ", "}
-                            {it.quantidade}× {it.produtoNome}
-                          </span>
-                        ))}
-                      </Td>
-                      <Td>
-                        <span className={`font-bold text-base ${quantidadeMontavel <= 0 ? "text-red-600" : "text-steel"}`}>
-                          {quantidadeMontavel}
-                        </span>
-                      </Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-    </section>
-  );
-}
-
 // ─── Compras ──────────────────────────────────────────────────────────────────
 
 function ComprasModulo({
@@ -3293,12 +3032,13 @@ function ComprasModulo({
   dataHoje: string;
 }) {
   const [pedidos, setPedidos] = useState<PedidoCompra[]>([]);
+  const tentativaCompra = useRef<{ assinatura: string; id: string } | null>(null);
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
   const [materiasPrimas, setMateriasPrimas] = useState<MateriaPrima[]>([]);
   const [usuariosMap, setUsuariosMap] = useState<Record<string, string>>({});
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
-  const [aba, setAba] = useState<"pedidos" | "fabricacao" | "historico-precos">("fabricacao");
+  const [aba, setAba] = useState<"pedidos" | "historico-produtos" | "historico-precos">("pedidos");
   const [mensagem, setMensagem] = useState("");
   const [erro, setErro] = useState("");
 
@@ -3309,7 +3049,7 @@ function ComprasModulo({
     valorTotal: "",
     observacao: "",
   });
-  const [itensNovoPedido, setItensNovoPedido] = useState<LinhaItemPedido[]>([]);
+  const [itensNovoPedido, setItensNovoPedido] = useState<LinhaItemPedido[]>(() => [novaLinhaItemPedido()]);
   const [dividirBalancete, setDividirBalancete] = useState(false);
 
   const [pedidoSelecionado, setPedidoSelecionado] = useState<PedidoCompra | null>(null);
@@ -3325,20 +3065,14 @@ function ComprasModulo({
   const [itensPedidoSelecionado, setItensPedidoSelecionado] = useState<ItemPedidoCompra[]>([]);
   const [itensFormDetalhe, setItensFormDetalhe] = useState<LinhaItemPedido[]>([]);
   const [carregandoItens, setCarregandoItens] = useState(false);
-  // Custo unitário médio de cada pedido (valor total dos itens ÷ soma das
-  // quantidades) — pra mostrar direto na linha da lista, sem abrir o pedido.
-  // Fica de fora (—) pra pedido sem item lançado, já que não tem quantidade
-  // pra dividir.
-  const [custoUnitPorPedido, setCustoUnitPorPedido] = useState<Record<string, number>>({});
-
   useEffect(() => {
     let ativo = true;
     async function carregar() {
       const supabase = createClient();
-      const [{ data: p }, { data: f }, { data: u }, { data: mp }, { data: itensTodos }] = await Promise.all([
+      const [{ data: p }, { data: f }, { data: u }, { data: mp }] = await Promise.all([
         supabase
           .from("pedidos_compra")
-          .select("*, fornecedores(nome)")
+          .select("*, fornecedores(nome), pedido_compra_itens(descricao)")
 
           .order("data", { ascending: false }),
         supabase
@@ -3348,7 +3082,6 @@ function ComprasModulo({
           .order("nome"),
         supabase.from("usuarios_empresa").select("usuario_id, nome, email"),
         supabase.from("materias_primas").select("*").eq("ativo", true).order("nome"),
-        supabase.from("pedido_compra_itens").select("pedido_compra_id, quantidade, valor_total"),
       ]);
       if (ativo) {
         setPedidos((p ?? []).map(mapPedidoCompra));
@@ -3357,7 +3090,6 @@ function ComprasModulo({
         setUsuariosMap(
           Object.fromEntries((u ?? []).map((m) => [String(m.usuario_id), String(m.nome || m.email || "")]))
         );
-        setCustoUnitPorPedido(calcularCustoUnitPorPedido(itensTodos ?? []));
         setCarregando(false);
       }
     }
@@ -3375,39 +3107,20 @@ function ComprasModulo({
     }
     setSalvando(true);
     const supabase = createClient();
-    const itensValidosNovoPedido = itensPreenchidos(itensNovoPedido);
-    const valorTotal = itensValidosNovoPedido.length > 0 ? somaItensPedido(itensValidosNovoPedido) : parseNumero(formPedido.valorTotal);
-    const { data, error } = await supabase
-      .from("pedidos_compra")
-      .insert({
-        criado_por: usuarioId,
-        fornecedor_id: formPedido.fornecedorId,
-        data: formPedido.data,
-        status: formPedido.status,
-        valor_total: valorTotal,
-        observacao: formPedido.observacao.trim(),
-      })
-      .select("*, fornecedores(nome)")
-      .single();
-
+    const erroItens = validarItensCompra(itensNovoPedido, materiasPrimas);
+    if (erroItens) { setSalvando(false); setErro(erroItens); return; }
+    const itensValidosNovoPedido = itensNovoPedido;
+    const valorTotal = somaItensPedido(itensValidosNovoPedido);
+    const assinatura = JSON.stringify({ formPedido, itensValidosNovoPedido });
+    if (tentativaCompra.current?.assinatura !== assinatura) tentativaCompra.current = { assinatura, id: crypto.randomUUID() };
+    const { data, error } = await supabase.rpc("salvar_compra_materiais", {
+      p_id: tentativaCompra.current.id, p_fornecedor: formPedido.fornecedorId, p_data: formPedido.data,
+      p_status: formPedido.status, p_valor: valorTotal, p_observacao: formPedido.observacao.trim(),
+      p_itens: itensValidosNovoPedido.map(item => ({ materia_prima_id: item.materiaPrimaId || null, descricao: item.descricao, quantidade: parseNumero(item.quantidade), valor_unitario: parseNumero(item.valorUnitario) })),
+    });
     if (error) { setSalvando(false); setErro(error.message); return; }
-    if (data) setPedidos((prev) => [mapPedidoCompra(data), ...prev]);
-
-    if (data && itensValidosNovoPedido.length > 0) {
-      await supabase.from("pedido_compra_itens").insert(
-        itensValidosNovoPedido.map((item) => ({
-          pedido_compra_id: data.id,
-          materia_prima_id: item.materiaPrimaId || null,
-          descricao: item.descricao,
-          quantidade: parseNumero(item.quantidade) || 1,
-          valor_unitario: parseNumero(item.valorUnitario),
-          valor_total: (parseNumero(item.quantidade) || 1) * parseNumero(item.valorUnitario),
-        }))
-      );
-      const totalQtd = itensValidosNovoPedido.reduce((s, item) => s + (parseNumero(item.quantidade) || 1), 0);
-      if (totalQtd > 0) {
-        setCustoUnitPorPedido((prev) => ({ ...prev, [data.id]: valorTotal / totalQtd }));
-      }
+    if (data) {
+      setPedidos(prev => [mapPedidoCompra({ ...data, pedido_compra_itens: itensValidosNovoPedido.map(item => ({ descricao: item.descricao })), fornecedores: { nome: fornecedores.find(f => f.id === formPedido.fornecedorId)?.nome ?? "" } }), ...prev]);
     }
 
     const fornecedorNome = fornecedores.find((f) => f.id === formPedido.fornecedorId)?.nome ?? "";
@@ -3422,16 +3135,12 @@ function ComprasModulo({
     });
 
     setSalvando(false);
+    tentativaCompra.current = null;
     setFormPedido({ fornecedorId: "", data: dataHoje, status: "pendente", valorTotal: "", observacao: "" });
-    setItensNovoPedido([]);
+    setItensNovoPedido([novaLinhaItemPedido()]);
     setDividirBalancete(false);
-    setMensagem(
-      avisoBalancete
-        ? `Pedido de compra registrado. ${avisoBalancete}`
-        : valorTotal > 0
-        ? "Pedido de compra registrado e lançado no balancete."
-        : "Pedido de compra registrado."
-    );
+    const resultado = formPedido.status === "recebido" ? "Compra recebida e matérias-primas adicionadas ao estoque." : formPedido.status === "cancelado" ? "Pedido cancelado registrado, sem entrada no estoque." : "Pedido de matéria-prima registrado. O estoque será atualizado no recebimento.";
+    setMensagem(avisoBalancete ? `${resultado} ${avisoBalancete}` : `${resultado} Compra lançada no balancete.`);
   }
 
   async function handleAtualizarStatusPedido(id: string, status: PedidoCompra["status"]) {
@@ -3442,11 +3151,11 @@ function ComprasModulo({
       .update({ status, atualizado_por: usuarioId, atualizado_em: atualizadoEm })
       .eq("id", id);
     if (error) { setErro(error.message); return; }
-    setPedidos((prev) => prev.map((p) => (p.id === id ? { ...p, status, atualizadoPor: usuarioId, atualizadoEm } : p)));
+    setPedidos((prev) => prev.map((p) => (p.id === id ? { ...p, status, estoqueIntegrado: p.estoqueIntegrado || status === "recebido", atualizadoPor: usuarioId, atualizadoEm } : p)));
     if (pedidoSelecionado?.id === id) {
-      setPedidoSelecionado((sel) => sel && { ...sel, status, atualizadoPor: usuarioId, atualizadoEm });
+      setPedidoSelecionado((sel) => sel && { ...sel, status, estoqueIntegrado: sel.estoqueIntegrado || status === "recebido", atualizadoPor: usuarioId, atualizadoEm });
     }
-    setMensagem("Status atualizado.");
+    setMensagem(status === "recebido" ? "Compra recebida: matérias-primas adicionadas ao estoque." : status === "cancelado" ? "Pedido cancelado. Se houve recebimento, a entrada foi estornada." : "Pedido pendente de recebimento.");
   }
 
   async function handleExcluirPedido(id: string) {
@@ -3498,6 +3207,7 @@ function ComprasModulo({
   // Se o pedido já tem itens, não mexe (não força linha em cima do que já
   // foi lançado).
   function iniciarEdicaoPedido() {
+    if (pedidoSelecionado?.estoqueIntegrado) { setErro("Pedido integrado ou histórico: os itens, valores e data estão preservados. Use cancelamento ou ajuste de estoque."); return; }
     setEditandoDetalhe(true);
     if (itensFormDetalhe.length === 0) {
       setItensFormDetalhe([novaLinhaItemPedido()]);
@@ -3515,8 +3225,10 @@ function ComprasModulo({
     const supabase = createClient();
     const fornecedor = fornecedores.find((f) => f.id === formDetalhe.fornecedorId);
     const atualizadoEm = new Date().toISOString();
-    const itensValidosFormDetalhe = itensPreenchidos(itensFormDetalhe);
-    const valorTotal = itensValidosFormDetalhe.length > 0 ? somaItensPedido(itensValidosFormDetalhe) : parseNumero(formDetalhe.valorTotal);
+    const erroValidacao = validarItensCompra(itensFormDetalhe, materiasPrimas);
+    if (erroValidacao) { setSalvandoDetalhe(false); setErro(erroValidacao); return; }
+    const itensValidosFormDetalhe = itensFormDetalhe;
+    const valorTotal = somaItensPedido(itensValidosFormDetalhe);
     const payload = {
       fornecedor_id: formDetalhe.fornecedorId,
       data: formDetalhe.data,
@@ -3526,42 +3238,21 @@ function ComprasModulo({
       atualizado_por: usuarioId,
       atualizado_em: atualizadoEm,
     };
-    const { error } = await supabase.from("pedidos_compra").update(payload).eq("id", pedidoSelecionado.id);
-    if (error) { setSalvandoDetalhe(false); setErro(error.message); return; }
-
-    // Sincroniza os itens: apaga tudo e regrava do zero — lista curta por
-    // pedido, mais simples e seguro do que diffar linha a linha. Linhas em
-    // branco (ex.: a pré-carregada ao entrar em edição, se ficou sem uso)
-    // não são gravadas.
-    await supabase.from("pedido_compra_itens").delete().eq("pedido_compra_id", pedidoSelecionado.id);
-    let itensAtualizados: ItemPedidoCompra[] = [];
-    if (itensValidosFormDetalhe.length > 0) {
-      const { data: itensSalvos } = await supabase
-        .from("pedido_compra_itens")
-        .insert(
-          itensValidosFormDetalhe.map((item) => ({
-            pedido_compra_id: pedidoSelecionado.id,
-            materia_prima_id: item.materiaPrimaId || null,
-            descricao: item.descricao,
-            quantidade: parseNumero(item.quantidade) || 1,
-            valor_unitario: parseNumero(item.valorUnitario),
-            valor_total: (parseNumero(item.quantidade) || 1) * parseNumero(item.valorUnitario),
-          }))
-        )
-        .select();
-      itensAtualizados = (itensSalvos ?? []).map(mapItemPedidoCompra);
-    }
-    const totalQtd = itensValidosFormDetalhe.reduce((s, item) => s + (parseNumero(item.quantidade) || 1), 0);
-    setCustoUnitPorPedido((prev) => {
-      const novo = { ...prev };
-      if (totalQtd > 0) novo[pedidoSelecionado.id] = valorTotal / totalQtd;
-      else delete novo[pedidoSelecionado.id];
-      return novo;
+    const { error } = await supabase.rpc("salvar_compra_materiais", {
+      p_id: pedidoSelecionado.id, p_fornecedor: payload.fornecedor_id, p_data: payload.data,
+      p_status: payload.status, p_valor: valorTotal, p_observacao: payload.observacao,
+      p_itens: itensValidosFormDetalhe.map(item => ({ materia_prima_id: item.materiaPrimaId || null, descricao: item.descricao, quantidade: parseNumero(item.quantidade), valor_unitario: parseNumero(item.valorUnitario) })),
     });
+    if (error) { setSalvandoDetalhe(false); setErro(error.message); return; }
+    const { data: itensSalvos, error: erroItens } = await supabase.from("pedido_compra_itens").select("*").eq("pedido_compra_id", pedidoSelecionado.id);
+    if (erroItens) { setSalvandoDetalhe(false); setErro("Compra salva, mas não foi possível atualizar os itens. Reabra o pedido."); return; }
+    const itensAtualizados = (itensSalvos ?? []).map(mapItemPedidoCompra);
     setSalvandoDetalhe(false);
 
     const pedidoAtualizado: PedidoCompra = {
       ...pedidoSelecionado,
+      pecas: [...new Set(itensAtualizados.map(item => item.descricao).filter(Boolean))],
+      estoqueIntegrado: formDetalhe.status === "recebido",
       fornecedorId: payload.fornecedor_id,
       fornecedorNome: fornecedor?.nome ?? pedidoSelecionado.fornecedorNome,
       data: payload.data,
@@ -3595,11 +3286,11 @@ function ComprasModulo({
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <SectionHeader
           tag="Compras"
-          titulo="Compras e reposição"
-          descricao="Reponha produtos para revenda e acompanhe as entradas de mercadoria."
+          titulo="Compras de matéria-prima"
+          descricao="Selecione as matérias-primas compradas, informe a quantidade e o preço por unidade. Ao receber a compra, o estoque dos materiais é atualizado e a disponibilidade dos produtos e kits é recalculada."
         />
         <div className="flex flex-wrap gap-2 rounded-xl border border-line bg-surface p-2 self-start">
-          {(["fabricacao", "pedidos", "historico-precos"] as const).map((t) => (
+          {(["pedidos", "historico-precos", "historico-produtos"] as const).map((t) => (
             <button
               key={t}
               type="button"
@@ -3610,7 +3301,7 @@ function ComprasModulo({
                   : "text-steel hover:bg-panel-hover"
               }`}
             >
-              {t === "pedidos" ? "Pedidos" : t === "fabricacao" ? "Compras / reposição" : "Estatísticas"}
+              {t === "pedidos" ? "Comprar matéria-prima" : t === "historico-produtos" ? "Histórico de produtos" : "Estatísticas"}
             </button>
           ))}
         </div>
@@ -3630,7 +3321,7 @@ function ComprasModulo({
             onSubmit={handleSalvarPedido}
             className="rounded-xl border border-line bg-surface p-5"
           >
-            <p className="text-sm font-semibold text-steel">Novo pedido</p>
+            <p className="text-sm font-semibold text-steel">Nova compra de matéria-prima</p>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <div className="sm:col-span-2">
                 <label className="mb-1 block text-sm font-medium">Fornecedor</label>
@@ -3653,9 +3344,7 @@ function ComprasModulo({
                 options={["pendente", "recebido", "cancelado"]}
                 placeholder=""
               />
-              {itensPreenchidos(itensNovoPedido).length === 0 && (
-                <CampoCadastro label="Valor total" value={formPedido.valorTotal} onChange={(v) => setFormPedido((f) => ({ ...f, valorTotal: v }))} placeholder="0,00" />
-              )}
+
               <CampoCadastro label="Observação" value={formPedido.observacao} onChange={(v) => setFormPedido((f) => ({ ...f, observacao: v }))} placeholder="Detalhes do pedido" />
               <ItensPedidoEditor itens={itensNovoPedido} onChange={setItensNovoPedido} materiasPrimas={materiasPrimas} />
             </div>
@@ -3699,9 +3388,8 @@ function ComprasModulo({
                   <thead className="sticky top-0 bg-surface text-steel">
                     <tr>
                       <Th>Data</Th>
-                      <Th>Fornecedor</Th>
+                      <Th>Peça / Fornecedor</Th>
                       <Th>Valor</Th>
-                      <Th>Custo unit.</Th>
                       <Th>Status</Th>
                       <Th>Lançado por</Th>
                     </tr>
@@ -3714,15 +3402,11 @@ function ComprasModulo({
                         className="cursor-pointer border-t border-panel-hover transition hover:bg-panel-hover"
                       >
                         <Td>{formatarData(p.data)}</Td>
-                        <Td className="font-semibold">{p.fornecedorNome || "-"}</Td>
-                        <Td>{formatarMoeda(p.valorTotal)}</Td>
-                        <Td>
-                          {custoUnitPorPedido[p.id] !== undefined ? (
-                            `${formatarMoeda(custoUnitPorPedido[p.id])}/un`
-                          ) : (
-                            <span className="text-muted">—</span>
-                          )}
+                        <Td className="min-w-56 max-w-sm whitespace-normal">
+                          {p.pecas.length ? <ul className="space-y-2">{p.pecas.map(peca => <li key={peca} className="border-l-2 border-accent/50 pl-2 font-semibold break-words">{peca}</li>)}</ul> : <p className="text-muted">Pedido sem itens</p>}
+                          <p className="mt-3 border-t border-line pt-2 text-xs text-muted"><span className="font-medium">Fornecedor:</span> {p.fornecedorNome || "Não informado"}</p>
                         </Td>
+                        <Td>{formatarMoeda(p.valorTotal)}</Td>
                         <Td>
                           <select
                             value={p.status}
@@ -3754,20 +3438,13 @@ function ComprasModulo({
         </div>
       )}
 
-      {aba === "fabricacao" && (
-        <FabricacaoSubModulo
-          usuarioId={usuarioId}
-          dataHoje={dataHoje}
-          fornecedores={fornecedores}
-          usuariosMap={usuariosMap}
-        />
-      )}
+      {aba === "historico-produtos" && <HistoricoComprasProdutos />}
 
       {aba === "historico-precos" && <HistoricoPrecosModulo materiasPrimas={materiasPrimas} />}
 
       {pedidoSelecionado && (
         <Modal
-          titulo={editandoDetalhe ? "Editar pedido de compra" : pedidoSelecionado.fornecedorNome || "Detalhe do pedido"}
+          titulo={editandoDetalhe ? "Editar pedido de compra" : pedidoSelecionado.pecas.length === 1 ? pedidoSelecionado.pecas[0] : "Detalhe do pedido de compra"}
           subtitulo="Compras"
           onClose={fecharDetalhePedido}
           largo
@@ -3796,9 +3473,7 @@ function ComprasModulo({
                 options={["pendente", "recebido", "cancelado"]}
                 placeholder=""
               />
-              {itensPreenchidos(itensFormDetalhe).length === 0 && (
-                <CampoCadastro label="Valor total" value={formDetalhe.valorTotal} onChange={(v) => setFormDetalhe((f) => ({ ...f, valorTotal: v }))} />
-              )}
+
               <div className="sm:col-span-2">
                 <CampoCadastro label="Observação" value={formDetalhe.observacao} onChange={(v) => setFormDetalhe((f) => ({ ...f, observacao: v }))} />
               </div>
@@ -4332,534 +4007,42 @@ async function buscarHistoricoPreco(
 
 // ─── Fabricação ───────────────────────────────────────────────────────────────
 
-function FabricacaoSubModulo({
-  usuarioId,
-  dataHoje,
-  fornecedores,
-  usuariosMap,
-}: {
-  usuarioId: string;
-  dataHoje: string;
-  fornecedores: Fornecedor[];
-  usuariosMap: Record<string, string>;
-}) {
-  const [produtos, setProdutos] = useState<Produto[]>([]);
+function HistoricoComprasProdutos() {
   const [pedidos, setPedidos] = useState<PedidoFabricacao[]>([]);
-  const [carregando, setCarregando] = useState(true);
-  const [salvando, setSalvando] = useState(false);
-  const [mensagem, setMensagem] = useState("");
   const [erro, setErro] = useState("");
-
-  const [compraDireta, setCompraDireta] = useState(true);
-  const [custoCompra, setCustoCompra] = useState("");
-  const tentativaCompra = useRef<{assinatura:string;id:string}|null>(null);
-  const [produtoId, setProdutoId] = useState("");
-  const [qtdFabricada, setQtdFabricada] = useState("1");
-  const [dataFab, setDataFab] = useState(dataHoje);
-  const [observacao, setObservacao] = useState("");
-  const [itens, setItens] = useState<ItemFabricacaoRascunho[]>([]);
-  const [componentesCarregados, setComponentesCarregados] = useState(false);
-  const [carregandoComp, setCarregandoComp] = useState(false);
-  const [dividirBalancete, setDividirBalancete] = useState(false);
-
-  const [pedidoSelecionado, setPedidoSelecionado] = useState<PedidoFabricacao | null>(null);
-  const [itensDetalhe, setItensDetalhe] = useState<ItemFabricacao[]>([]);
-  // Só preço e fornecedor do item já lançado são editáveis — quantidade e
-  // peça ficam travadas porque são elas que afetam o estoque (ver aviso na
-  // tela). Corrigir isso não mexe em nenhum saldo de estoque, só no custo/
-  // fornecedor registrado do pedido.
-  const [itensPrecoForm, setItensPrecoForm] = useState<Record<string, string>>({});
-  const [itensFornecedorForm, setItensFornecedorForm] = useState<Record<string, string>>({});
-  const [carregandoItensDetalhe, setCarregandoItensDetalhe] = useState(false);
-  const [editandoDetalhe, setEditandoDetalhe] = useState(false);
-  const [salvandoDetalhe, setSalvandoDetalhe] = useState(false);
-  const [formDetalhe, setFormDetalhe] = useState({ data: "", observacao: "" });
-
+  const [carregando, setCarregando] = useState(true);
+  const [selecionado, setSelecionado] = useState<PedidoFabricacao | null>(null);
+  const [itens, setItens] = useState<ItemFabricacao[]>([]);
+  const [carregandoItens, setCarregandoItens] = useState(false);
+  const requisicao = useRef(0);
   useEffect(() => {
     let ativo = true;
-    async function carregar() {
-      const supabase = createClient();
-      const [{ data: p }, { data: ped }] = await Promise.all([
-        supabase.from("produtos").select("*").eq("ativo", true).order("nome"),
-        supabase.from("pedidos_fabricacao").select("*").order("data", { ascending: false }).limit(50),
-      ]);
-      if (ativo) {
-        setProdutos((p ?? []).map(mapProduto));
-        setPedidos((ped ?? []).map(mapPedidoFabricacao));
-        setCarregando(false);
-      }
-    }
-    carregar();
+    buscarTodasLinhas(createClient(), "pedidos_fabricacao").then(rows => {
+      if (ativo) setPedidos(rows.map(mapPedidoFabricacao).sort((a, b) => b.data.localeCompare(a.data)));
+    }).catch(e => { if (ativo) setErro(e instanceof Error ? e.message : "Falha ao carregar histórico."); })
+      .finally(() => { if (ativo) setCarregando(false); });
     return () => { ativo = false; };
-  }, [usuarioId]);
-
-  async function handleCarregarComponentes() {
-    setErro("");
-    if (!produtoId) { setErro("Selecione um produto."); return; }
-    setCarregandoComp(true);
-    const supabase = createClient();
-    const { data } = await supabase
-      .from("componentes_produto")
-      .select("*")
-      .eq("produto_id", produtoId)
-      .order("created_at");
-    setCarregandoComp(false);
-    const componentes = (data ?? []).map(mapComponente);
-    if (componentes.length === 0) {
-      setErro("Este produto não possui matérias-primas cadastradas. Acesse a aba Produtos → BOM.");
-      return;
-    }
-    setItens(componentes.map((c) => ({
-      componenteId: c.id,
-      nomePeca: c.nomePeca,
-      qtdPc: c.quantidade,
-      linkCompra: c.linkCompra,
-      fornecedorNome: "",
-      precoUnitario: "0",
-    })));
-    setComponentesCarregados(true);
+  }, []);
+  async function abrir(pedido: PedidoFabricacao) {
+    const atual = ++requisicao.current;
+    setSelecionado(pedido); setItens([]); setErro(""); setCarregandoItens(true);
+    try {
+      const { data, error } = await createClient().from("itens_fabricacao").select("*").eq("pedido_id", pedido.id).order("nome_peca");
+      if (error) throw error;
+      if (requisicao.current === atual) setItens((data ?? []).map(mapItemFabricacao));
+    } catch (e) { if (requisicao.current === atual) setErro(String((e as { message?: string }).message ?? "Falha ao carregar itens.")); }
+    finally { if (requisicao.current === atual) setCarregandoItens(false); }
   }
-
-  function qtdTotal(qtdPc: number) {
-    return qtdPc * (parseNumero(qtdFabricada) || 1);
-  }
-
-  function precoTotal(item: ItemFabricacaoRascunho) {
-    return qtdTotal(item.qtdPc) * parseNumero(item.precoUnitario);
-  }
-
-  const valorTotalGeral = compraDireta ? parseNumero(custoCompra) : itens.reduce((s, i) => s + precoTotal(i), 0);
-
-  function atualizarItem(idx: number, campo: keyof ItemFabricacaoRascunho, valor: string) {
-    setItens((prev) => prev.map((it, i) => i === idx ? { ...it, [campo]: valor } : it));
-  }
-
-  async function handleSalvar() {
-    setErro("");
-    if (!produtoId || dataFab !== dataHoje || parseNumero(qtdFabricada)<=0 || valorTotalGeral<=0 || (!compraDireta && itens.length === 0)) {
-      setErro("Informe produto, quantidade e custo positivos. Registre o recebimento na data de hoje.");
-      return;
-    }
-    const produto = produtos.find((p) => p.id === produtoId);
-    setSalvando(true);
-    const supabase = createClient();
-
-    const itensCompra = compraDireta ? [] : itens.map(it=>({nome_peca:it.nomePeca,qtd_pc:it.qtdPc,preco_unitario:parseNumero(it.precoUnitario),fornecedor_nome:it.fornecedorNome}));
-    const assinatura=JSON.stringify({produtoId,qtdFabricada,valorTotalGeral,itensCompra,observacao});
-    if(tentativaCompra.current?.assinatura!==assinatura)tentativaCompra.current={assinatura,id:crypto.randomUUID()};
-    const { data, error: errPedido } = await supabase.rpc("registrar_compra_produto",{
-      p_id:tentativaCompra.current.id,p_produto_id:produtoId,p_quantidade:parseNumero(qtdFabricada),p_valor_total:valorTotalGeral,p_itens:itensCompra,p_observacao:observacao.trim(),
-    });
-    if(errPedido || !data){setSalvando(false);setErro(errPedido?.code==="PGRST202"?"Execute o SQL de unificação de compras e CMV no Supabase.":errPedido?.message??"Não foi possível registrar a compra.");return;}
-    const pedido=Array.isArray(data)?data[0]:data;
-    setPedidos(prev=>[mapPedidoFabricacao(pedido),...prev.filter(p=>p.id!==pedido.id)]);
-    const {data:produtosAtualizados}=await supabase.from("produtos").select("*").eq("ativo",true).order("nome");
-    if(produtosAtualizados)setProdutos(produtosAtualizados.map(mapProduto));
-
-    const nomeItemBalancete = `Compra / reposição${produto?.nome ? ` - ${produto.nome}` : ""}`;
-    const avisoBalancete = await lancarCompraNoBalancete({
-      dividir: dividirBalancete,
-      valorTotal: valorTotalGeral,
-      data: dataFab,
-      nomeItem: nomeItemBalancete,
-      usuarioId,
-      usuariosMap,
-    });
-
-    tentativaCompra.current=null;
-    setSalvando(false);
-    setCustoCompra("");
-    setProdutoId("");
-    setQtdFabricada("1");
-    setDataFab(dataHoje);
-    setObservacao("");
-    setItens([]);
-    setComponentesCarregados(false);
-    setDividirBalancete(false);
-    setMensagem(
-      avisoBalancete
-        ? `Compra registrada com estoque e custo médio atualizados. ${avisoBalancete}`
-        : valorTotalGeral > 0
-        ? "Compra registrada com estoque e custo médio atualizados e lançado no balancete."
-        : "Compra registrada com estoque e custo médio atualizados."
-    );
-  }
-
-  async function abrirDetalhePedido(pedido: PedidoFabricacao) {
-    setPedidoSelecionado(pedido);
-    setEditandoDetalhe(false);
-    setFormDetalhe({ data: pedido.data, observacao: pedido.observacao });
-    setCarregandoItensDetalhe(true);
-    const supabase = createClient();
-    const { data } = await supabase.from("itens_fabricacao").select("*").eq("pedido_id", pedido.id).order("nome_peca");
-    const itens = (data ?? []).map(mapItemFabricacao);
-    setItensDetalhe(itens);
-    setItensPrecoForm(Object.fromEntries(itens.map((it) => [it.id, String(it.precoUnitario).replace(".", ",")])));
-    setItensFornecedorForm(Object.fromEntries(itens.map((it) => [it.id, it.fornecedorNome])));
-    setCarregandoItensDetalhe(false);
-  }
-
-  function fecharDetalhePedido() {
-    setPedidoSelecionado(null);
-    setEditandoDetalhe(false);
-    setItensDetalhe([]);
-  }
-
-  async function handleSalvarDetalhePedido() {
-    if (!pedidoSelecionado) return;
-    if (!formDetalhe.data) { setErro("Informe a data."); return; }
-    setSalvandoDetalhe(true);
-    setErro("");
-    const supabase = createClient();
-
-    // Corrige preço unitário/total e fornecedor de cada item que mudou — sem
-    // tocar em qtd_pc/qtd_total/nome_peca, que são o que afeta o estoque.
-    const itensAtualizados = itensDetalhe.map((item) => {
-      const novoPrecoUnitario = parseNumero(itensPrecoForm[item.id] ?? String(item.precoUnitario));
-      const novoFornecedorNome = itensFornecedorForm[item.id] ?? item.fornecedorNome;
-      return { ...item, precoUnitario: novoPrecoUnitario, precoTotal: item.qtdTotal * novoPrecoUnitario, fornecedorNome: novoFornecedorNome };
-    });
-    const itensAlterados = itensAtualizados.filter(
-      (item, i) => item.precoUnitario !== itensDetalhe[i].precoUnitario || item.fornecedorNome !== itensDetalhe[i].fornecedorNome
-    );
-    for (const item of itensAlterados) {
-      const { error: errItem } = await supabase
-        .from("itens_fabricacao")
-        .update({ preco_unitario: item.precoUnitario, preco_total: item.precoTotal, fornecedor_nome: item.fornecedorNome })
-        .eq("id", item.id);
-      if (errItem) { setSalvandoDetalhe(false); setErro(errItem.message); return; }
-    }
-    const novoValorTotal = itensAtualizados.reduce((s, item) => s + item.precoTotal, 0);
-
-    const payload = { data: formDetalhe.data, observacao: formDetalhe.observacao.trim(), valor_total: novoValorTotal };
-    const { error } = await supabase.from("pedidos_fabricacao").update(payload).eq("id", pedidoSelecionado.id);
-    setSalvandoDetalhe(false);
-    if (error) { setErro(error.message); return; }
-    const atualizado: PedidoFabricacao = { ...pedidoSelecionado, data: payload.data, observacao: payload.observacao, valorTotal: novoValorTotal };
-    setPedidos((prev) => prev.map((p) => p.id === pedidoSelecionado.id ? atualizado : p));
-    setPedidoSelecionado(atualizado);
-    setItensDetalhe(itensAtualizados);
-    setEditandoDetalhe(false);
-    setMensagem("Pedido de fabricação atualizado.");
-  }
-
-  async function handleExcluirDetalhePedido() {
-    if (!pedidoSelecionado) return;
-    if (!confirm("Excluir este pedido de fabricação? O estoque produzido será estornado.")) return;
-    const supabase = createClient();
-    const { error } = await supabase.from("pedidos_fabricacao").delete().eq("id", pedidoSelecionado.id);
-    if (error) { setErro(error.message); return; }
-    await supabase.from("itens_fabricacao").delete().eq("pedido_id", pedidoSelecionado.id);
-
-    const produtoFab = produtos.find((p) => p.id === pedidoSelecionado.produtoId);
-    if (produtoFab) {
-      const novoSaldo = Math.max(0, produtoFab.estoqueAtual - pedidoSelecionado.qtdFabricada);
-      await supabase.from("produtos").update({ estoque_atual: novoSaldo }).eq("id", pedidoSelecionado.produtoId);
-      setProdutos((prev) => prev.map((p) => p.id === pedidoSelecionado.produtoId ? { ...p, estoqueAtual: novoSaldo } : p));
-    }
-
-    setPedidos((prev) => prev.filter((p) => p.id !== pedidoSelecionado.id));
-    fecharDetalhePedido();
-    setMensagem("Pedido de fabricação removido.");
-  }
-
-  if (carregando) return <EstadoCarregando texto="Carregando compras..." />;
-
-  return (
-    <div className="mt-6 space-y-6">
-      <FeedbackBloco mensagem={mensagem} erro={erro} />
-
-      {/* Formulário de novo pedido */}
-      <div className="rounded-xl border border-line bg-surface p-5">
-        <p className="text-sm font-semibold text-steel">Nova compra / reposição recebida</p>
-
-        <p className="mt-2 text-sm leading-6 text-muted">Esta é a antiga aba de Fabricação, agora usada para compras e reposição. Os lançamentos anteriores são preservados. Novas entradas atualizam o estoque e o custo médio uma única vez.</p>
-        <label className="mt-4 block text-sm">Forma de registrar<select value={compraDireta ? "direta" : "componentes"} onChange={e=>setCompraDireta(e.target.value==="direta")} className="mt-1 block min-h-11 w-full rounded-lg border border-line bg-panel px-3"><option value="direta">Compra de produto pronto</option><option value="componentes">Detalhar custos por componentes</option></select></label>
-        <div className="mt-4 grid gap-4 sm:grid-cols-3">
-          <div className="sm:col-span-2">
-            <label className="mb-1 block text-sm font-medium">Produto comprado</label>
-            <select
-              value={produtoId}
-              onChange={(e) => { setProdutoId(e.target.value); setComponentesCarregados(false); setItens([]); }}
-              className="w-full rounded-lg border border-line bg-panel px-4 py-3 text-sm text-foreground outline-none focus:border-accent focus:ring-2 focus:ring-accent-dark"
-            >
-              <option value="">Selecione o produto...</option>
-              {produtos.map((p) => (
-                <option key={p.id} value={p.id}>{p.codigo ? `[${p.codigo}] ` : ""}{p.nome}</option>
-              ))}
-            </select>
-          </div>
-          <CampoCadastro label="Quantidade recebida" value={qtdFabricada} onChange={setQtdFabricada} placeholder="1" />
-          <CampoCadastro label="Data" type="date" value={dataFab} onChange={setDataFab} required />
-          {compraDireta && <div className="sm:col-span-3"><CampoCadastro label="Custo total recebido (incluindo frete)" value={custoCompra} onChange={setCustoCompra} placeholder="0,00" required /></div>}
-          <div className="sm:col-span-2">
-            <CampoCadastro label="Observação" value={observacao} onChange={setObservacao} placeholder="Detalhe do pedido" />
-          </div>
-        </div>
-
-        {!compraDireta && <button
-          type="button"
-          onClick={handleCarregarComponentes}
-          disabled={carregandoComp || !produtoId}
-          className="mt-4 inline-flex h-10 items-center gap-2 rounded-lg border border-accent bg-panel px-4 text-sm font-semibold text-muted transition hover:bg-panel-hover disabled:opacity-50"
-        >
-          <RefreshCw className="h-4 w-4" />
-          {carregandoComp ? "Carregando..." : "Carregar matérias-primas"}
-        </button>}
-
-        {(compraDireta || (componentesCarregados && itens.length > 0)) && (
-          <>
-            {!compraDireta && <div className="mt-5 overflow-auto rounded-lg border border-line">
-              <table className="min-w-[800px] w-full bg-panel text-left text-sm">
-                <thead className="bg-surface text-steel">
-                  <tr>
-                    <Th>Nome da Peça</Th>
-                    <Th>Qtd/un</Th>
-                    <Th>Qtd total</Th>
-                    <Th>Link</Th>
-                    <Th>Fornecedor</Th>
-                    <Th>Preço unit.</Th>
-                    <Th>Preço total</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {itens.map((it, idx) => (
-                    <tr key={it.componenteId} className="border-t border-panel-hover">
-                      <Td className="font-semibold">{it.nomePeca}</Td>
-                      <Td>{it.qtdPc}</Td>
-                      <Td className="font-semibold text-steel">{qtdTotal(it.qtdPc)}</Td>
-                      <Td>
-                        {it.linkCompra ? (
-                          <a href={it.linkCompra} target="_blank" rel="noopener noreferrer"
-                            className="text-steel underline text-xs">Ver</a>
-                        ) : <span className="text-steel">—</span>}
-                      </Td>
-                      <Td>
-                        <select
-                          value={it.fornecedorNome}
-                          onChange={(e) => atualizarItem(idx, "fornecedorNome", e.target.value)}
-                          className="w-36 rounded-xl border border-line bg-panel px-2 py-1.5 text-xs text-foreground outline-none focus:border-accent"
-                        >
-                          <option value="">—</option>
-                          {fornecedores.map((f) => (
-                            <option key={f.id} value={f.nome}>{f.nome}</option>
-                          ))}
-                        </select>
-                      </Td>
-                      <Td>
-                        <input
-                          type="text"
-                          value={it.precoUnitario}
-                          onChange={(e) => atualizarItem(idx, "precoUnitario", e.target.value)}
-                          className="w-24 rounded-xl border border-line bg-panel px-2 py-1.5 text-xs text-foreground outline-none focus:border-accent"
-                          placeholder="0,00"
-                        />
-                      </Td>
-                      <Td className="font-semibold">{formatarMoeda(precoTotal(it))}</Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>}
-
-            <button
-              type="button"
-              onClick={() => setDividirBalancete((v) => !v)}
-              className={`mt-4 flex w-full items-center justify-between gap-3 rounded-lg border px-4 py-3 text-left transition ${
-                dividirBalancete
-                  ? "border-accent bg-accent/15"
-                  : "border-line bg-panel hover:bg-panel-hover"
-              }`}
-            >
-              <span>
-                <span className="block text-sm font-semibold text-foreground">Dividir no balancete entre os sócios</span>
-                <span className="mt-0.5 block text-xs text-muted">
-                  {dividirBalancete
-                    ? "Ligado: lança metade do custo pra Matheus e metade pra Enyo."
-                    : "Desligado: lança o custo integral no balancete pra quem estiver registrando."}
-                </span>
-              </span>
-              <span className={`relative h-6 w-11 shrink-0 rounded-full transition ${dividirBalancete ? "bg-accent" : "bg-line"}`}>
-                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${dividirBalancete ? "left-5" : "left-0.5"}`} />
-              </span>
-            </button>
-
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-              <p className="text-sm font-semibold">
-                Custo total da entrada:{" "}
-                <span className="text-steel">{formatarMoeda(valorTotalGeral)}</span>
-              </p>
-              <button
-                type="button"
-                onClick={handleSalvar}
-                disabled={salvando}
-                className="inline-flex h-11 items-center gap-2 rounded-lg bg-accent px-5 text-sm font-semibold text-background transition hover:bg-accent-dark disabled:opacity-60"
-              >
-                <Save className="h-4 w-4" />
-                {salvando ? "Salvando..." : "Registrar compra / reposição"}
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Histórico */}
-      <div className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
-        <p className="text-sm font-semibold text-steel">Histórico de compras e entradas</p>
-        <p className="mt-0.5 text-xs text-muted">Clique em um pedido para ver os itens usados e editar.</p>
-        <div className="mt-4 overflow-hidden rounded-xl border border-line">
-          {pedidos.length > 0 ? (
-            <div className="max-h-72 overflow-auto">
-              <table className="min-w-[560px] w-full bg-panel text-left text-sm">
-                <thead className="sticky top-0 bg-surface text-steel">
-                  <tr>
-                    <Th>Data</Th>
-                    <Th>Produto</Th>
-                    <Th>Qtd fabricada</Th>
-                    <Th>Custo unit.</Th>
-                    <Th>Custo total</Th>
-                    <Th>Lançado por</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pedidos.map((p) => (
-                    <tr
-                      key={p.id}
-                      onClick={() => abrirDetalhePedido(p)}
-                      className="cursor-pointer border-t border-panel-hover transition hover:bg-panel-hover"
-                    >
-                      <Td>{formatarData(p.data)}</Td>
-                      <Td className="font-semibold">{p.produtoNome}</Td>
-                      <Td>{p.qtdFabricada}</Td>
-                      <Td>
-                        {p.qtdFabricada > 0 ? (
-                          `${formatarMoeda(p.valorTotal / p.qtdFabricada)}/un`
-                        ) : (
-                          <span className="text-muted">—</span>
-                        )}
-                      </Td>
-                      <Td className="font-semibold text-steel">{formatarMoeda(p.valorTotal)}</Td>
-                      <Td className="text-xs text-muted">{nomeUsuario(usuariosMap, p.criadoPor)}</Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <EstadoTabelaVazia texto="Nenhuma compra / reposição registrada." />
-          )}
-        </div>
-      </div>
-
-      {pedidoSelecionado && (
-        <Modal
-          titulo={editandoDetalhe ? "Editar pedido de fabricação" : pedidoSelecionado.produtoNome || "Detalhe da fabricação"}
-          subtitulo="Compra / reposição"
-          onClose={fecharDetalhePedido}
-          largo
-        >
-          <FeedbackBloco mensagem="" erro={erro} />
-          {editandoDetalhe ? (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <CampoCadastro label="Data" type="date" value={formDetalhe.data} onChange={(v) => setFormDetalhe((f) => ({ ...f, data: v }))} required />
-              <div className="sm:col-span-2">
-                <CampoCadastro label="Observação" value={formDetalhe.observacao} onChange={(v) => setFormDetalhe((f) => ({ ...f, observacao: v }))} />
-              </div>
-              <p className="sm:col-span-2 text-xs text-muted">
-                Produto, quantidade fabricada e peça de cada item não podem ser editados aqui — eles afetam o estoque. Para corrigir isso, exclua este pedido e registre novamente. Preço e fornecedor de cada item podem ser corrigidos abaixo, sem mexer no estoque.
-              </p>
-
-              {itensDetalhe.length > 0 && (
-                <div className="sm:col-span-2">
-                  <p className="mb-2 text-sm font-semibold text-steel">Corrigir preço e fornecedor dos itens usados</p>
-                  <div className="overflow-x-auto rounded-lg border border-panel-hover">
-                    <table className="min-w-[560px] w-full text-left text-xs">
-                      <thead className="bg-surface text-steel">
-                        <tr><Th>Peça</Th><Th>Qtd total</Th><Th>Fornecedor</Th><Th>Preço unit.</Th><Th>Preço total</Th></tr>
-                      </thead>
-                      <tbody>
-                        {itensDetalhe.map((item) => {
-                          const precoUnitario = parseNumero(itensPrecoForm[item.id] ?? "0");
-                          return (
-                            <tr key={item.id} className="border-t border-panel-hover">
-                              <Td className="font-semibold">{item.nomePeca}</Td>
-                              <Td>{item.qtdTotal}</Td>
-                              <Td>
-                                <select
-                                  value={itensFornecedorForm[item.id] ?? ""}
-                                  onChange={(e) => setItensFornecedorForm((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                                  className="h-8 w-36 rounded-lg border border-line bg-background px-2 text-xs text-foreground outline-none focus:border-accent"
-                                >
-                                  <option value="">—</option>
-                                  {fornecedores.map((f) => (
-                                    <option key={f.id} value={f.nome}>{f.nome}</option>
-                                  ))}
-                                </select>
-                              </Td>
-                              <Td>
-                                <input
-                                  type="text"
-                                  value={itensPrecoForm[item.id] ?? ""}
-                                  onChange={(e) => setItensPrecoForm((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                                  className="h-8 w-24 rounded-lg border border-line bg-background px-2 text-xs text-foreground outline-none focus:border-accent"
-                                />
-                              </Td>
-                              <Td>{formatarMoeda(item.qtdTotal * precoUnitario)}</Td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div>
-              <LinhaDetalhe label="Produto" valor={pedidoSelecionado.produtoNome} />
-              <LinhaDetalhe label="Data" valor={formatarData(pedidoSelecionado.data)} />
-              <LinhaDetalhe label="Quantidade recebida" valor={pedidoSelecionado.qtdFabricada} />
-              <LinhaDetalhe label="Custo total" valor={formatarMoeda(pedidoSelecionado.valorTotal)} destaque />
-              {pedidoSelecionado.observacao && <LinhaDetalhe label="Observação" valor={pedidoSelecionado.observacao} />}
-
-              <p className="mb-2 mt-5 text-sm font-semibold text-steel">Itens usados</p>
-              {carregandoItensDetalhe ? (
-                <p className="py-3 text-xs text-muted">Carregando itens...</p>
-              ) : itensDetalhe.length > 0 ? (
-                <div className="overflow-auto rounded-xl border border-panel-hover">
-                  <table className="min-w-[480px] w-full text-left text-xs">
-                    <thead className="bg-surface text-steel">
-                      <tr><Th>Peça</Th><Th>Qtd total</Th><Th>Fornecedor</Th><Th>Preço total</Th></tr>
-                    </thead>
-                    <tbody>
-                      {itensDetalhe.map((it) => (
-                        <tr key={it.id} className="border-t border-panel-hover">
-                          <Td className="font-semibold">{it.nomePeca}</Td>
-                          <Td>{it.qtdTotal}</Td>
-                          <Td>{it.fornecedorNome || "—"}</Td>
-                          <Td>{formatarMoeda(it.precoTotal)}</Td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <p className="py-3 text-xs text-muted">Nenhum item registrado para este pedido.</p>
-              )}
-            </div>
-          )}
-          {pedidoSelecionado.integradoCmv ? <p className="mt-4 text-sm text-muted">Compra recebida integrada ao CMV. Alterações de custo ou estorno exigem conciliação; não são feitos por edição direta.</p> : <ModalAcoes
-            editando={editandoDetalhe}
-            salvando={salvandoDetalhe}
-            onEditar={() => setEditandoDetalhe(true)}
-            onSalvar={handleSalvarDetalhePedido}
-            onCancelar={() => setEditandoDetalhe(false)}
-            onExcluir={handleExcluirDetalhePedido}
-          />}
-        </Modal>
-      )}
-    </div>
-  );
+  return <div className="mt-6 space-y-4">
+    <p className="text-sm text-muted">Compras de produtos registradas no modelo anterior, disponíveis para consulta. Lance novas compras em Comprar matéria-prima.</p>
+    {erro && <p role="alert" className="text-red-400">{erro}</p>}
+    {carregando ? <EstadoCarregando texto="Carregando histórico..." /> : <div className="max-h-[480px] overflow-auto rounded-xl border border-line"><table className="w-full text-left text-sm"><thead><tr><Th>Data</Th><Th>Produto</Th><Th>Quantidade</Th><Th>Valor total</Th><Th>Detalhes</Th></tr></thead><tbody>{pedidos.map(p => <tr key={p.id} className="border-t border-line"><Td>{formatarData(p.data)}</Td><Td>{p.produtoNome}</Td><Td>{p.qtdFabricada}</Td><Td>{formatarMoeda(p.valorTotal)}</Td><Td><button className="text-accent" onClick={() => abrir(p)}>Consultar</button></Td></tr>)}</tbody></table>{!pedidos.length && <EstadoTabelaVazia texto="Nenhuma compra de produto no histórico." />}</div>}
+    {selecionado && <Modal titulo={selecionado.produtoNome} subtitulo="Compra histórica de produto" onClose={() => { requisicao.current++; setSelecionado(null); }} largo>
+      <LinhaDetalhe label="Data" valor={formatarData(selecionado.data)} /><LinhaDetalhe label="Quantidade" valor={selecionado.qtdFabricada} /><LinhaDetalhe label="Valor total" valor={formatarMoeda(selecionado.valorTotal)} /><LinhaDetalhe label="Observação" valor={selecionado.observacao || "—"} />
+      {erro && <p role="alert" className="text-red-400">{erro}</p>}
+      {carregandoItens ? <p>Carregando itens...</p> : <ul className="mt-4 space-y-2 text-sm">{itens.map(i => <li key={i.id}>{i.nomePeca} • {i.qtdTotal} • {i.fornecedorNome || "Sem fornecedor"} • {formatarMoeda(i.precoTotal)}</li>)}</ul>}
+    </Modal>}
+  </div>;
 }
 
 // ─── Balancete ────────────────────────────────────────────────────────────────
@@ -5535,12 +4718,7 @@ function EstadoCarregando({ texto }: { texto: string }) {
   );
 }
 
-// Itens opcionais de um pedido de compra — cada linha pode vir do cadastro de
-// matérias-primas (puxa nome e custo de referência automaticamente, editável
-// depois porque o preço da compra real pode variar) ou ser um item avulso com
-// descrição livre. Quantidade × valor unitário soma pro valor total do
-// pedido. Reaproveitado tanto no formulário de "Novo pedido" quanto na
-// edição do detalhe, pra não duplicar a UI de adicionar/remover linha.
+// Compra de matérias-primas: quantidade na unidade cadastrada × preço unitário.
 function ItensPedidoEditor({
   itens,
   onChange,
@@ -5578,41 +4756,39 @@ function ItensPedidoEditor({
   return (
     <div className="sm:col-span-2">
       <div className="flex items-center justify-between">
-        <label className="block text-sm font-medium">Itens (opcional — some ao valor total)</label>
+        <label className="block text-sm font-medium">Matérias-primas compradas</label>
         <button
           type="button"
           onClick={adicionar}
           className="inline-flex h-8 items-center gap-1 rounded-xl border border-line bg-panel px-2 text-xs font-semibold text-muted hover:bg-panel-hover"
         >
-          <Plus className="h-3.5 w-3.5" /> Adicionar item
+          <Plus className="h-3.5 w-3.5" /> Adicionar matéria-prima
         </button>
       </div>
+      <p className="mt-2 text-xs text-muted">Selecione materiais cadastrados. O status Recebido dá entrada nas quantidades compradas; Pendente aguarda recebimento.</p>
+      {!materiasPrimas.length && <p className="mt-2 text-sm text-amber-400">Cadastre uma matéria-prima na aba Cadastro antes de lançar a compra.</p>}
       {itens.map((item) => (
         <div key={item.id} className="mt-2 rounded-xl border border-line bg-background p-2">
           <div className="flex flex-wrap gap-2">
             <select
+              required
+              aria-label="Matéria-prima comprada"
               value={item.materiaPrimaId}
               onChange={(e) => selecionarMateriaPrima(item.id, e.target.value)}
               className="h-9 min-w-[180px] flex-1 rounded-xl border border-line bg-surface px-2 text-sm text-foreground outline-none focus:border-accent"
             >
-              <option value="">Item avulso (digitar descrição)</option>
+              <option value="">Selecione a matéria-prima...</option>
               {materiasPrimas.map((mp) => (
                 <option key={mp.id} value={mp.id}>
                   {mp.codigo ? `${mp.codigo} — ` : ""}{mp.nome}
                 </option>
               ))}
             </select>
-            {!item.materiaPrimaId && (
-              <input
-                type="text"
-                value={item.descricao}
-                onChange={(e) => atualizar(item.id, "descricao", e.target.value)}
-                placeholder="Descrição"
-                className="h-9 min-w-[160px] flex-1 rounded-xl border border-line bg-surface px-3 text-sm text-foreground outline-none focus:border-accent"
-              />
-            )}
             <input
               type="text"
+              required
+              aria-label="Quantidade comprada"
+              inputMode="decimal"
               value={item.quantidade}
               onChange={(e) => atualizar(item.id, "quantidade", e.target.value)}
               placeholder="Qtd"
@@ -5620,6 +4796,9 @@ function ItensPedidoEditor({
             />
             <input
               type="text"
+              required
+              aria-label="Preço por unidade da matéria-prima"
+              inputMode="decimal"
               value={item.valorUnitario}
               onChange={(e) => atualizar(item.id, "valorUnitario", e.target.value)}
               placeholder="R$ un."
@@ -5635,7 +4814,7 @@ function ItensPedidoEditor({
           </div>
           {item.materiaPrimaId && (
             <p className="mt-1.5 text-xs text-muted">
-              {item.descricao} — valor unitário puxado do cadastro, editável se o preço dessa compra for diferente.
+              {item.descricao} • Quantidade em {materiasPrimas.find(m => m.id === item.materiaPrimaId)?.unidade ?? "un"} • Preço em R$ por {materiasPrimas.find(m => m.id === item.materiaPrimaId)?.unidade ?? "un"}. Total: {formatarMoeda(parseNumero(item.quantidade) * parseNumero(item.valorUnitario))}.
             </p>
           )}
         </div>
@@ -5856,11 +5035,14 @@ function ModalAcoes({
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapMateriaPrima(r: any): MateriaPrima {
   return {
+    influenciaSaldo: r.influencia_saldo !== false,
     id: String(r.id),
     codigo: String(r.codigo ?? ""),
     nome: String(r.nome ?? ""),
     unidade: String(r.unidade ?? "un"),
-    custo: Number(r.custo ?? 0),
+    custo: Number(r.custo_medio ?? r.custo ?? 0),
+    custoMedio: r.custo_medio == null ? null : Number(r.custo_medio),
+    custoMedioEstimado: r.custo_medio_estimado !== false,
     linkCompra: String(r.link_compra ?? ""),
     ativo: Boolean(r.ativo ?? true),
   };
@@ -5947,6 +5129,7 @@ function mapProduto(r: any): Produto {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapVenda(r: any): Venda {
   return {
+    materiaPrimaConsumo: r.materia_prima_consumo ?? [],
     id: String(r.id),
     cmvTotal: r.cmv_total == null ? null : Number(r.cmv_total),
     cmvEstimado: r.cmv_estimado !== false,
@@ -6032,6 +5215,8 @@ function mapItemFabricacao(r: any): ItemFabricacao {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapPedidoCompra(r: any): PedidoCompra {
   return {
+    pecas: [...new Set<string>((r.pedido_compra_itens ?? []).map((item: { descricao?: string }) => String(item.descricao ?? "").trim()).filter(Boolean))],
+    estoqueIntegrado: r.estoque_integrado === true,
     id: String(r.id),
     fornecedorId: String(r.fornecedor_id ?? ""),
     fornecedorNome: String(r.fornecedores?.nome ?? ""),
@@ -6057,6 +5242,17 @@ function mapItemPedidoCompra(r: any): ItemPedidoCompra {
     valorUnitario: Number(r.valor_unitario ?? 0),
     valorTotal: Number(r.valor_total ?? 0),
   };
+}
+
+function validarItensCompra(itens: LinhaItemPedido[], materiais: MateriaPrima[]): string | null {
+  if (!itens.length) return "Adicione ao menos uma matéria-prima à compra.";
+  for (const item of itens) {
+    if (!materiais.some(m => m.id === item.materiaPrimaId && m.ativo)) return "Selecione uma matéria-prima ativa em cada linha. Remova as linhas que não serão usadas.";
+    const qtd = parseNumero(item.quantidade);
+    const preco = parseNumero(item.valorUnitario);
+    if (!item.quantidade.trim() || !item.valorUnitario.trim() || !Number.isFinite(qtd) || qtd <= 0 || !Number.isFinite(preco) || preco < 0) return "Informe quantidade positiva e preço unitário válido em cada matéria-prima.";
+  }
+  return null;
 }
 
 function novaLinhaItemPedido(): LinhaItemPedido {
@@ -6085,26 +5281,6 @@ function somaItensPedido(itens: LinhaItemPedido[]): number {
   return itensPreenchidos(itens).reduce((s, i) => s + parseNumero(i.quantidade) * parseNumero(i.valorUnitario), 0);
 }
 
-// Custo unitário médio por pedido = soma do valor_total dos itens ÷ soma das
-// quantidades — usado na linha da lista de Pedidos, sem precisar abrir cada um.
-function calcularCustoUnitPorPedido(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  itens: any[]
-): Record<string, number> {
-  const acumulado: Record<string, { qtd: number; valor: number }> = {};
-  itens.forEach((item) => {
-    const pedidoId = String(item.pedido_compra_id ?? "");
-    if (!pedidoId) return;
-    if (!acumulado[pedidoId]) acumulado[pedidoId] = { qtd: 0, valor: 0 };
-    acumulado[pedidoId].qtd += Number(item.quantidade ?? 0);
-    acumulado[pedidoId].valor += Number(item.valor_total ?? 0);
-  });
-  const resultado: Record<string, number> = {};
-  Object.entries(acumulado).forEach(([pedidoId, { qtd, valor }]) => {
-    if (qtd > 0) resultado[pedidoId] = valor / qtd;
-  });
-  return resultado;
-}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

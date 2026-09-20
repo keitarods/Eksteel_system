@@ -15,6 +15,7 @@ const ABAS_VALIDAS = [
   "vendas",
   "cadastro",
   "estoque",
+  "atividades",
   "compras",
   "relatorios",
   "balancete",

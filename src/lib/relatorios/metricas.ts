@@ -47,7 +47,7 @@ export function prepararVendas(base: BaseGerencial) {
     const consumo = gravado ? v.cmvComponentes?.length ? v.cmvComponentes.map(i => ({ produtoId: i.produto_id, quantidade: Number(i.quantidade) })) : null : consumoVenda(v, base.kits);
     const custos = consumo?.map((i, index) => {
       const custo = gravado ? v.cmvComponentes?.[index]?.custo_unitario : base.produtos.find(p => p.id === i.produtoId)?.custo;
-      return { ...i, custo: custo != null && custo > 0 ? moeda(Number(custo) * i.quantidade) : null };
+      return { ...i, custo: custo != null && (gravado ? custo >= 0 : custo > 0) ? moeda(Number(custo) * i.quantidade) : null };
     }) ?? [];
     const cpv = gravado ? v.cmvTotal ?? null : consumo && custos.every(i => i.custo !== null) ? moeda(custos.reduce((s,i) => s + (i.custo ?? 0),0)) : null;
     const bruta = moeda(v.quantidade * v.valorUnitario);
