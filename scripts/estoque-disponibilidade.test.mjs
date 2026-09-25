@@ -61,3 +61,28 @@ test('qualquer item pode alternar entre somente alerta e limitar saldo, independ
  assert.equal(c.estimado,true);
  assert.equal(c.itens.find(i=>i.id==='embalagem').subtotal,null);
  });
+
+const { ultimosPrecosMateriais, calcularUltimoCustoComposicao } = await import('../src/lib/estoque/disponibilidade.ts');
+const entrada = (id, data, custo, extra = {}) => ({ id, data, criado_em: `${data}T12:00:00Z`, materia_prima_id: 'chapa', tipo: 'compra', quantidade: 10, custo_informado: custo, ...extra });
+test('último preço respeita data, desempata pelo registro e ignora médias, saídas e compras canceladas', () => {
+ const movimentos = [entrada('1', '2026-09-01', 20), entrada('2', '2026-09-02', 30),
+  entrada('3', '2026-09-03', null, { custo_unitario: 25 }),
+  entrada('4', '2026-09-04', 99, { tipo: 'ajuste_custo', quantidade: 0 }),
+  entrada('5', '2026-09-05', 40, { referencia_id: 'cancelada' }),
+  entrada('6', '2026-09-06', 40, { referencia_id: 'cancelada', tipo: 'estorno_compra', quantidade: -10 }),
+  entrada('7', '2026-09-07', 80, { tipo: 'estorno_venda' }),
+  entrada('8', '2026-08-01', 90, { criado_em: '2026-09-08T12:00:00Z' }),
+  entrada('9', '2026-09-02', 32, { criado_em: '2026-09-02T13:00:00Z' })];
+ assert.equal(ultimosPrecosMateriais(movimentos).get('chapa'), 32);
+ assert.equal(ultimosPrecosMateriais([entrada('zero', '2026-09-09', 0)]).get('chapa'), 0);
+});
+test('último custo inclui apoio e quantidades do kit, sem substituir preço ausente pela média', () => {
+ const itens = [{ produto_id: 'p1', quantidade: 2 }, { produto_id: 'p2', quantidade: 1 }];
+ const precos = new Map([['chapa', 30], ['embalagem', 2]]);
+ const c = calcularUltimoCustoComposicao(itens, produtos, comps, materiaisComCusto, precos);
+ assert.equal(c.total, 214);
+ assert.equal(c.itens.find(i => i.id === 'chapa').quantidade, 7);
+ precos.delete('embalagem');
+ assert.equal(calcularUltimoCustoComposicao(itens, produtos, comps, materiaisComCusto, precos).total, null);
+ assert.equal(calcularCustoComposicao(itens, produtos, comps, materiaisComCusto).total, 142);
+});

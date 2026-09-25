@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { buscarTodasLinhas } from "@/lib/relatorios/dados";
-import { calcularCustoComposicao, calcularDisponibilidade, faltas, type Material, type ProdutoEstoque, type Componente, type ItemKit } from "@/lib/estoque/disponibilidade";
+import { calcularUltimoCustoComposicao, ultimosPrecosMateriais, type MovimentoPreco, calcularCustoComposicao, calcularDisponibilidade, faltas, type Material, type ProdutoEstoque, type Componente, type ItemKit } from "@/lib/estoque/disponibilidade";
 
-type Movimento = { id: string; materia_prima_id: string | null; produto_id: string | null; quantidade: number; saldo_apos: number; tipo: string; motivo: string; data: string; criado_em: string; criado_por: string; custo_unitario: number | null; custo_medio_apos: number | null; custo_estimado_apos: boolean };
+type Movimento = MovimentoPreco & { id: string; materia_prima_id: string | null; produto_id: string | null; quantidade: number; saldo_apos: number; tipo: string; motivo: string; data: string; criado_em: string; criado_por: string; custo_unitario: number | null; custo_medio_apos: number | null; custo_estimado_apos: boolean };
 type Base = { materiais: Material[]; produtos: ProdutoEstoque[]; componentes: Componente[]; kits: { id: string; nome: string }[]; itens: ItemKit[]; movimentos: Movimento[]; usuarios: Record<string,string> };
 const input = "w-full rounded-lg border border-line bg-background p-3 text-sm";
 const moeda = (valor: number | null | undefined) => valor == null ? "Sem custo" : Number(valor).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 4 });
@@ -72,9 +72,10 @@ export default function EstoqueMateriais() {
 
   const materiais = base?.materiais ?? [];
   const produtos = base?.produtos ?? [];
+  const ultimosPrecos = ultimosPrecosMateriais(base?.movimentos ?? []);
   const linhas = base ? [
-    ...produtos.filter(p => p.ativo).map(p => ({ id: p.id, nome: p.nome, codigo: p.codigo, kit: false, fisico: Number(p.estoque_atual), custo: calcularCustoComposicao([{ produto_id: p.id, quantidade: 1 }], produtos, base.componentes, materiais), disponibilidade: calcularDisponibilidade([{ produto_id: p.id, quantidade: 1 }], produtos, base.componentes, materiais) })),
-    ...base.kits.map(k => ({ id: k.id, nome: k.nome, codigo: "Kit", kit: true, fisico: 0, custo: calcularCustoComposicao(base.itens.filter(i => i.kit_id === k.id), produtos, base.componentes, materiais), disponibilidade: calcularDisponibilidade(base.itens.filter(i => i.kit_id === k.id), produtos, base.componentes, materiais) })),
+    ...produtos.filter(p => p.ativo).map(p => ({ id: p.id, nome: p.nome, codigo: p.codigo, kit: false, fisico: Number(p.estoque_atual), ultimoCusto: calcularUltimoCustoComposicao([{ produto_id: p.id, quantidade: 1 }], produtos, base.componentes, materiais, ultimosPrecos), custo: calcularCustoComposicao([{ produto_id: p.id, quantidade: 1 }], produtos, base.componentes, materiais), disponibilidade: calcularDisponibilidade([{ produto_id: p.id, quantidade: 1 }], produtos, base.componentes, materiais) })),
+    ...base.kits.map(k => ({ id: k.id, nome: k.nome, codigo: "Kit", kit: true, fisico: 0, ultimoCusto: calcularUltimoCustoComposicao(base.itens.filter(i => i.kit_id === k.id), produtos, base.componentes, materiais, ultimosPrecos), custo: calcularCustoComposicao(base.itens.filter(i => i.kit_id === k.id), produtos, base.componentes, materiais), disponibilidade: calcularDisponibilidade(base.itens.filter(i => i.kit_id === k.id), produtos, base.componentes, materiais) })),
   ] : [];
   const filtrar = (nome: string, codigo: string) => `${nome} ${codigo}`.toLocaleLowerCase("pt-BR").includes(busca.toLocaleLowerCase("pt-BR"));
   function verHistorico(id: string) {
@@ -114,16 +115,22 @@ export default function EstoqueMateriais() {
             <section className="mt-4 rounded-lg border border-line bg-panel p-3" aria-label="Custo do produto ou kit">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
-                  <p className="text-xs text-muted">Custo por {l.kit ? "kit" : "produto"}</p>
+                  <p className="text-xs text-muted">Custo médio por {l.kit ? "kit" : "produto"}</p>
                   <p className={`mt-1 text-xl font-bold tabular-nums ${l.custo.total === null ? "text-amber-400" : "text-foreground"}`}>
                     {l.custo.total === null ? "Custo pendente" : moeda(l.custo.total)}
                   </p>
                 </div>
                 {l.custo.estimado && l.custo.total !== null && <span className="rounded-full bg-amber-400/10 px-2 py-1 text-xs text-amber-400">Estimado</span>}
               </div>
+              {l.disponibilidade.usaMateriais && <div className="mt-3 border-t border-line pt-3">
+                <p className="text-xs text-muted">Último custo por {l.kit ? "kit" : "produto"}</p>
+                <p className={`mt-1 text-xl font-bold tabular-nums ${l.ultimoCusto.total === null ? "text-amber-400" : "text-accent"}`}>{l.ultimoCusto.total === null ? "Custo pendente" : moeda(l.ultimoCusto.total)}</p>
+                <p className="mt-1 text-xs text-muted">Consumo × último preço informado em entrada, pela data da movimentação. Inclui itens de apoio.</p>
+                {l.ultimoCusto.total === null && <p className="mt-1 text-xs text-amber-400">Falta preço de entrada para algum componente da composição.</p>}
+              </div>}
               {l.custo.total === null && referenciaProduto != null && <p className="mt-2 text-xs text-muted">Referência histórica do produto: <strong>{moeda(referenciaProduto)}</strong>. Valor sem distribuição entre os componentes; não incluído na soma atual.</p>}
               <details className="mt-3 border-t border-line pt-3 text-sm">
-                <summary className="cursor-pointer text-muted">Ver composição do custo</summary>
+                <summary className="cursor-pointer text-muted">Ver composição dos custos</summary>
                 <p className="mt-3 text-xs text-muted">Quantidades para 1 {l.kit ? "kit" : "produto"}. Subtotal = quantidade × custo unitário.</p>
                 <ul className="mt-3 space-y-3">
                   {l.custo.itens.map(i => <li key={i.id} className="rounded-lg border border-line bg-surface p-3">
@@ -133,6 +140,7 @@ export default function EstoqueMateriais() {
                       <div><dt className="text-xs text-muted">Custo unitário</dt><dd className={`mt-1 font-medium tabular-nums ${i.custoUnitario === null ? "text-amber-400" : ""}`}>{i.custoUnitario === null ? "Não lançado" : moeda(i.custoUnitario)}{i.custoUnitario !== null && <span className="text-xs text-muted"> / {i.unidade}</span>}</dd></div>
                       <div><dt className="text-xs text-muted">Subtotal</dt><dd className={`mt-1 font-bold tabular-nums ${i.subtotal === null ? "text-amber-400" : ""}`}>{i.subtotal === null ? "Não lançado" : moeda(i.subtotal)}</dd></div>
                     </dl>
+                    {l.disponibilidade.usaMateriais && <p className="mt-3 text-xs text-muted">Último preço de entrada: <strong>{moeda(l.ultimoCusto.itens.find(item => item.id === i.id)?.custoUnitario)}</strong> / {i.unidade} · Subtotal: <strong>{moeda(l.ultimoCusto.itens.find(item => item.id === i.id)?.subtotal)}</strong></p>}
                     {resumoHistorico(i.id)}
                   </li>)}
                 </ul>

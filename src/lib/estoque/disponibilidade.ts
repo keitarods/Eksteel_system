@@ -52,6 +52,27 @@ export type CustoComposicao = {
   itens: { id: string; nome: string; quantidade: number; unidade: string; custoUnitario: number | null; subtotal: number | null }[];
 };
 
+export type MovimentoPreco = { id: string; materia_prima_id: string | null; referencia_id?: string | null; tipo: string; quantidade: number; custo_informado?: number | null; data: string; criado_em: string };
+
+/** Última entrada com preço explícito, pela data da movimentação. */
+export function ultimosPrecosMateriais(movimentos: MovimentoPreco[]): Map<string, number> {
+  const canceladas = new Set(movimentos.filter(m => m.tipo === "estorno_compra" && m.referencia_id).map(m => m.referencia_id));
+  const precos = new Map<string, number>();
+  const entradas = movimentos.filter(m => m.materia_prima_id && ["compra", "entrada", "ajuste"].includes(m.tipo)
+    && Number(m.quantidade) > 0 && m.custo_informado != null && Number.isFinite(Number(m.custo_informado)) && Number(m.custo_informado) >= 0
+    && !(m.tipo === "compra" && m.referencia_id && canceladas.has(m.referencia_id)));
+  entradas.sort((a, b) => b.data.localeCompare(a.data) || b.criado_em.localeCompare(a.criado_em) || b.id.localeCompare(a.id));
+  for (const m of entradas) if (!precos.has(m.materia_prima_id!)) precos.set(m.materia_prima_id!, Number(m.custo_informado));
+  return precos;
+}
+
+export function calcularUltimoCustoComposicao(itens: { produto_id: string; quantidade: number }[], produtos: ProdutoEstoque[], componentes: Componente[], materiais: Material[], precos: Map<string, number>): CustoComposicao {
+  const custo = calcularCustoComposicao(itens, produtos.map(p => ({ ...p, custo: undefined, custo_medio: null })), componentes,
+    materiais.map(m => ({ ...m, custo_medio: precos.get(m.id) ?? null })));
+  // Sem preço de todos os componentes, não apresentar uma soma parcial como custo completo.
+  return { ...custo, total: custo.itens.some(i => i.subtotal === null) ? null : custo.total };
+}
+
 /** Inclui TODOS os materiais, mesmo os que não limitam disponibilidade. */
 export function calcularCustoComposicao(itens: { produto_id: string; quantidade: number }[], produtos: ProdutoEstoque[], componentes: Componente[], materiais: Material[]): CustoComposicao {
   const parcelas: CustoComposicao["itens"] = [];
