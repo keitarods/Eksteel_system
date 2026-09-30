@@ -3065,6 +3065,9 @@ function ComprasModulo({
   const [itensPedidoSelecionado, setItensPedidoSelecionado] = useState<ItemPedidoCompra[]>([]);
   const [itensFormDetalhe, setItensFormDetalhe] = useState<LinhaItemPedido[]>([]);
   const [carregandoItens, setCarregandoItens] = useState(false);
+  const [erroCargaItens, setErroCargaItens] = useState(false);
+  const leituraPedido = useRef(0);
+  const mutacaoPedido = useRef(false);
   useEffect(() => {
     let ativo = true;
     async function carregar() {
@@ -3144,30 +3147,56 @@ function ComprasModulo({
   }
 
   async function handleAtualizarStatusPedido(id: string, status: PedidoCompra["status"]) {
-    const supabase = createClient();
-    const atualizadoEm = new Date().toISOString();
-    const { error } = await supabase
-      .from("pedidos_compra")
-      .update({ status, atualizado_por: usuarioId, atualizado_em: atualizadoEm })
-      .eq("id", id);
-    if (error) { setErro(error.message); return; }
-    setPedidos((prev) => prev.map((p) => (p.id === id ? { ...p, status, estoqueIntegrado: p.estoqueIntegrado || status === "recebido", atualizadoPor: usuarioId, atualizadoEm } : p)));
-    if (pedidoSelecionado?.id === id) {
-      setPedidoSelecionado((sel) => sel && { ...sel, status, estoqueIntegrado: sel.estoqueIntegrado || status === "recebido", atualizadoPor: usuarioId, atualizadoEm });
+    const pedido = pedidos.find(p => p.id === id);
+    if (!pedido || pedido.status === status || mutacaoPedido.current) return;
+    mutacaoPedido.current = true;
+    setSalvandoDetalhe(true); setErro(""); setMensagem("");
+    try {
+      const db = createClient();
+      const { data: itens, error: erroItens } = await db.from("pedido_compra_itens").select("materia_prima_id, descricao, quantidade, valor_unitario").eq("pedido_compra_id", id).order("criado_em");
+      if (erroItens) { setErro("Não foi possível carregar os itens para alterar o status."); return; }
+      const { data, error } = await db.rpc("editar_compra_materiais", {
+        p_id: id, p_versao: pedido.atualizadoEm || null, p_fornecedor: pedido.fornecedorId,
+        p_data: pedido.data, p_status: status, p_valor: pedido.valorTotal,
+        p_observacao: pedido.observacao, p_itens: itens ?? [],
+      });
+      if (error) { setErro(error.code === "PGRST202" ? "Solicite a atualização de compras no banco ao administrador." : error.message); return; }
+      const atualizado = { ...pedido, status: data.status, estoqueIntegrado: Boolean(data.estoque_integrado), atualizadoPor: data.atualizado_por ?? usuarioId, atualizadoEm: data.atualizado_em ?? "" };
+      setPedidos(prev => prev.map(p => p.id === id ? atualizado : p));
+      setPedidoSelecionado(sel => sel?.id === id ? atualizado : sel);
+      setMensagem(status === "recebido" ? "Compra recebida: estoque atualizado." : status === "cancelado" ? "Compra cancelada: entrada de estoque estornada." : "Compra pendente: entrada anterior de estoque estornada, quando existente.");
+    } catch {
+      setErro("Não foi possível confirmar o status. Atualize a lista antes de tentar novamente.");
+    } finally {
+      mutacaoPedido.current = false;
+      setSalvandoDetalhe(false);
     }
-    setMensagem(status === "recebido" ? "Compra recebida: matérias-primas adicionadas ao estoque." : status === "cancelado" ? "Pedido cancelado. Se houve recebimento, a entrada foi estornada." : "Pedido pendente de recebimento.");
   }
 
-  async function handleExcluirPedido(id: string) {
-    if (!confirm("Excluir este pedido de compra?")) return;
-    const supabase = createClient();
-    const { error } = await supabase.from("pedidos_compra").delete().eq("id", id);
-    if (error) { setErro(error.message); return; }
-    setPedidos((prev) => prev.filter((p) => p.id !== id));
-    setMensagem("Pedido removido.");
+  async function handleExcluirPedido(pedido: PedidoCompra): Promise<boolean> {
+    if (mutacaoPedido.current) return false;
+    if (!confirm("Excluir este pedido de compra? A entrada será retirada do estoque e o histórico da operação será preservado. Confira também o rateio no balancete.")) return false;
+    mutacaoPedido.current = true;
+    setSalvandoDetalhe(true); setErro(""); setMensagem("");
+    try {
+      const { error } = await createClient().rpc("excluir_compra_materiais", { p_id: pedido.id, p_versao: pedido.atualizadoEm || null });
+      if (error) { setErro(error.code === "PGRST202" ? "A exclusão precisa da atualização de compras no banco. Solicite a atualização ao administrador." : error.message); return false; }
+      setPedidos(prev => prev.filter(p => p.id !== pedido.id));
+      setMensagem("Compra excluída e entrada de estoque estornada. O histórico foi preservado. Confira também o rateio no balancete.");
+      return true;
+    } catch {
+      setErro("Não foi possível confirmar a exclusão. Atualize a lista para verificar se a compra foi removida.");
+      return false;
+    } finally {
+      mutacaoPedido.current = false;
+      setSalvandoDetalhe(false);
+    }
   }
 
   async function abrirDetalhePedido(pedido: PedidoCompra) {
+    setErro("");
+    setErroCargaItens(false);
+    const leitura = ++leituraPedido.current;
     setPedidoSelecionado(pedido);
     setEditandoDetalhe(false);
     setFormDetalhe({
@@ -3181,11 +3210,13 @@ function ComprasModulo({
     setItensFormDetalhe([]);
     setCarregandoItens(true);
     const supabase = createClient();
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("pedido_compra_itens")
       .select("*")
       .eq("pedido_compra_id", pedido.id)
       .order("criado_em");
+    if (leitura !== leituraPedido.current) return;
+    if (error) { setCarregandoItens(false); setErroCargaItens(true); setErro("Não foi possível carregar os itens. Feche e reabra a compra."); return; }
     const itens = (data ?? []).map(mapItemPedidoCompra);
     setItensPedidoSelecionado(itens);
     // Já deixa uma linha em branco pronta pro editor quando o pedido não tem
@@ -3197,83 +3228,93 @@ function ComprasModulo({
   }
 
   function fecharDetalhePedido() {
+    if (salvandoDetalhe) return;
+    leituraPedido.current++;
     setPedidoSelecionado(null);
     setEditandoDetalhe(false);
   }
 
-  // Ao entrar em edição de um pedido que ainda não tem nenhum item lançado,
-  // já abre uma linha vazia — igual acontece ao clicar em "Adicionar item"
-  // no formulário de lançar um pedido novo, sem exigir esse clique extra.
-  // Se o pedido já tem itens, não mexe (não força linha em cima do que já
-  // foi lançado).
   function iniciarEdicaoPedido() {
-    if (pedidoSelecionado?.estoqueIntegrado) { setErro("Pedido integrado ou histórico: os itens, valores e data estão preservados. Use cancelamento ou ajuste de estoque."); return; }
+    if (!pedidoSelecionado || carregandoItens || erroCargaItens || salvandoDetalhe) return;
+    setErro("");
+    setFormDetalhe({ fornecedorId: pedidoSelecionado.fornecedorId, data: pedidoSelecionado.data,
+      status: pedidoSelecionado.status, valorTotal: String(pedidoSelecionado.valorTotal), observacao: pedidoSelecionado.observacao });
+    setItensFormDetalhe(itensPedidoSelecionado.length ? itensPedidoSelecionado.map(itemParaLinha) : [novaLinhaItemPedido()]);
     setEditandoDetalhe(true);
-    if (itensFormDetalhe.length === 0) {
-      setItensFormDetalhe([novaLinhaItemPedido()]);
-    }
   }
 
   async function handleSalvarDetalhePedido() {
-    if (!pedidoSelecionado) return;
+    if (!pedidoSelecionado || mutacaoPedido.current || salvandoDetalhe || carregandoItens || erroCargaItens) return;
     if (!formDetalhe.data || !formDetalhe.fornecedorId) {
       setErro("Preencha data e fornecedor.");
       return;
     }
+    mutacaoPedido.current = true;
     setSalvandoDetalhe(true);
     setErro("");
-    const supabase = createClient();
-    const fornecedor = fornecedores.find((f) => f.id === formDetalhe.fornecedorId);
-    const atualizadoEm = new Date().toISOString();
-    const erroValidacao = validarItensCompra(itensFormDetalhe, materiasPrimas);
-    if (erroValidacao) { setSalvandoDetalhe(false); setErro(erroValidacao); return; }
-    const itensValidosFormDetalhe = itensFormDetalhe;
-    const valorTotal = somaItensPedido(itensValidosFormDetalhe);
-    const payload = {
-      fornecedor_id: formDetalhe.fornecedorId,
-      data: formDetalhe.data,
-      status: formDetalhe.status,
-      valor_total: valorTotal,
-      observacao: formDetalhe.observacao.trim(),
-      atualizado_por: usuarioId,
-      atualizado_em: atualizadoEm,
-    };
-    const { error } = await supabase.rpc("salvar_compra_materiais", {
-      p_id: pedidoSelecionado.id, p_fornecedor: payload.fornecedor_id, p_data: payload.data,
-      p_status: payload.status, p_valor: valorTotal, p_observacao: payload.observacao,
-      p_itens: itensValidosFormDetalhe.map(item => ({ materia_prima_id: item.materiaPrimaId || null, descricao: item.descricao, quantidade: parseNumero(item.quantidade), valor_unitario: parseNumero(item.valorUnitario) })),
-    });
-    if (error) { setSalvandoDetalhe(false); setErro(error.message); return; }
-    const { data: itensSalvos, error: erroItens } = await supabase.from("pedido_compra_itens").select("*").eq("pedido_compra_id", pedidoSelecionado.id);
-    if (erroItens) { setSalvandoDetalhe(false); setErro("Compra salva, mas não foi possível atualizar os itens. Reabra o pedido."); return; }
-    const itensAtualizados = (itensSalvos ?? []).map(mapItemPedidoCompra);
-    setSalvandoDetalhe(false);
+    try {
+      const supabase = createClient();
+      const fornecedor = fornecedores.find((f) => f.id === formDetalhe.fornecedorId);
+      const atualizadoEm = new Date().toISOString();
+      const erroValidacao = validarItensCompra(itensFormDetalhe, materiasPrimas);
+      if (erroValidacao) { setSalvandoDetalhe(false); setErro(erroValidacao); return; }
+      const itensValidosFormDetalhe = itensFormDetalhe;
+      const valorTotal = somaItensPedido(itensValidosFormDetalhe);
+      const payload = {
+        fornecedor_id: formDetalhe.fornecedorId,
+        data: formDetalhe.data,
+        status: formDetalhe.status,
+        valor_total: valorTotal,
+        observacao: formDetalhe.observacao.trim(),
+        atualizado_por: usuarioId,
+        atualizado_em: atualizadoEm,
+      };
+      const { data: pedidoSalvo, error } = await supabase.rpc("editar_compra_materiais", {
+        p_versao: pedidoSelecionado.atualizadoEm || null,
+        p_id: pedidoSelecionado.id, p_fornecedor: payload.fornecedor_id, p_data: payload.data,
+        p_status: payload.status, p_valor: valorTotal, p_observacao: payload.observacao,
+        p_itens: itensValidosFormDetalhe.map(item => ({ materia_prima_id: item.materiaPrimaId || null, descricao: item.descricao, quantidade: parseNumero(item.quantidade), valor_unitario: parseNumero(item.valorUnitario) })),
+      });
+      if (error) { setErro(error.code === "PGRST202" ? "A edição precisa da atualização do banco: aplique a migração editar-compras.sql no Supabase." : error.message); return; }
+      const { data: itensSalvos, error: erroItens } = await supabase.from("pedido_compra_itens").select("*").eq("pedido_compra_id", pedidoSelecionado.id).order("criado_em");
+      if (erroItens) { setSalvandoDetalhe(false); setErro("Compra salva, mas não foi possível atualizar os itens. Reabra o pedido."); return; }
+      const itensAtualizados = (itensSalvos ?? []).map(mapItemPedidoCompra);
+      setSalvandoDetalhe(false);
 
-    const pedidoAtualizado: PedidoCompra = {
-      ...pedidoSelecionado,
-      pecas: [...new Set(itensAtualizados.map(item => item.descricao).filter(Boolean))],
-      estoqueIntegrado: formDetalhe.status === "recebido",
-      fornecedorId: payload.fornecedor_id,
-      fornecedorNome: fornecedor?.nome ?? pedidoSelecionado.fornecedorNome,
-      data: payload.data,
-      status: payload.status,
-      valorTotal: payload.valor_total,
-      observacao: payload.observacao,
-      atualizadoPor: usuarioId,
-      atualizadoEm,
-    };
-    setPedidos((prev) => prev.map((p) => p.id === pedidoSelecionado.id ? pedidoAtualizado : p));
-    setPedidoSelecionado(pedidoAtualizado);
-    setItensPedidoSelecionado(itensAtualizados);
-    setItensFormDetalhe(itensAtualizados.map(itemParaLinha));
-    setEditandoDetalhe(false);
-    setMensagem("Pedido atualizado.");
+      const pedidoAtualizado: PedidoCompra = {
+        ...pedidoSelecionado,
+        pecas: [...new Set(itensAtualizados.map(item => item.descricao).filter(Boolean))],
+        estoqueIntegrado: Boolean(pedidoSalvo.estoque_integrado),
+        fornecedorId: payload.fornecedor_id,
+        fornecedorNome: fornecedor?.nome ?? pedidoSelecionado.fornecedorNome,
+        data: payload.data,
+        status: payload.status,
+        valorTotal: payload.valor_total,
+        observacao: payload.observacao,
+        atualizadoPor: usuarioId,
+        atualizadoEm: pedidoSalvo.atualizado_em ?? atualizadoEm,
+      };
+      setPedidos((prev) => prev.map((p) => p.id === pedidoSelecionado.id ? pedidoAtualizado : p));
+      setPedidoSelecionado(pedidoAtualizado);
+      setItensPedidoSelecionado(itensAtualizados);
+      setItensFormDetalhe(itensAtualizados.map(itemParaLinha));
+      setEditandoDetalhe(false);
+      setMensagem("Pedido atualizado. Se o valor ou a data mudou, confira também o rateio no balancete.");
+    } catch {
+      setErro("Não foi possível confirmar a atualização. Reabra a compra para verificar os dados antes de tentar novamente.");
+    } finally {
+      mutacaoPedido.current = false;
+      setSalvandoDetalhe(false);
+    }
   }
 
   async function handleExcluirDetalhePedido() {
     if (!pedidoSelecionado) return;
-    await handleExcluirPedido(pedidoSelecionado.id);
-    fecharDetalhePedido();
+    if (await handleExcluirPedido(pedidoSelecionado)) {
+      leituraPedido.current++;
+      setPedidoSelecionado(null);
+      setEditandoDetalhe(false);
+    }
   }
 
   const totalCompras = pedidos.reduce((s, p) => s + p.valorTotal, 0);
@@ -3392,6 +3433,7 @@ function ComprasModulo({
                       <Th>Valor</Th>
                       <Th>Status</Th>
                       <Th>Lançado por</Th>
+                      <Th>Ações</Th>
                     </tr>
                   </thead>
                   <tbody>
@@ -3410,6 +3452,7 @@ function ComprasModulo({
                         <Td>
                           <select
                             value={p.status}
+                            disabled={salvandoDetalhe}
                             onClick={(e) => e.stopPropagation()}
                             onChange={(e) => handleAtualizarStatusPedido(p.id, e.target.value as PedidoCompra["status"])}
                             className={`rounded-full px-3 py-1 text-xs font-semibold outline-none ${
@@ -3426,6 +3469,7 @@ function ComprasModulo({
                           </select>
                         </Td>
                         <Td className="text-xs text-muted">{nomeUsuario(usuariosMap, p.criadoPor)}</Td>
+                        <Td><button type="button" className="rounded-lg border border-line px-3 py-2 font-medium hover:bg-panel-hover" onClick={e => { e.stopPropagation(); void abrirDetalhePedido(p); }}>Ver / editar</button></Td>
                       </tr>
                     ))}
                   </tbody>
@@ -3451,7 +3495,8 @@ function ComprasModulo({
         >
           <FeedbackBloco mensagem="" erro={erro} />
           {editandoDetalhe ? (
-            <div className="grid gap-4 sm:grid-cols-2">
+            <fieldset disabled={salvandoDetalhe} className="grid gap-4 sm:grid-cols-2">
+              <p className="text-xs text-muted sm:col-span-2">Edite e salve para manter o mesmo pedido. O estoque será conciliado automaticamente. Confira o rateio no balancete caso altere valor ou data.</p>
               <div className="sm:col-span-2">
                 <label className="mb-1 block text-sm font-medium">Fornecedor</label>
                 <select
@@ -3478,7 +3523,7 @@ function ComprasModulo({
                 <CampoCadastro label="Observação" value={formDetalhe.observacao} onChange={(v) => setFormDetalhe((f) => ({ ...f, observacao: v }))} />
               </div>
               <ItensPedidoEditor itens={itensFormDetalhe} onChange={setItensFormDetalhe} materiasPrimas={materiasPrimas} />
-            </div>
+            </fieldset>
           ) : (
             <div>
               <LinhaDetalhe label="Fornecedor" valor={pedidoSelecionado.fornecedorNome || "-"} />
@@ -3543,7 +3588,7 @@ function ComprasModulo({
             salvando={salvandoDetalhe}
             onEditar={iniciarEdicaoPedido}
             onSalvar={handleSalvarDetalhePedido}
-            onCancelar={() => setEditandoDetalhe(false)}
+            onCancelar={() => { if (!salvandoDetalhe) setEditandoDetalhe(false); }}
             onExcluir={handleExcluirDetalhePedido}
           />
         </Modal>
@@ -5003,6 +5048,7 @@ function ModalAcoes({
           <button
             type="button"
             onClick={onCancelar}
+            disabled={salvando}
             className="inline-flex h-11 items-center gap-2 rounded-lg border border-line bg-surface px-4 text-sm font-semibold text-muted transition hover:bg-panel-hover"
           >
             <X className="h-4 w-4" /> Cancelar
@@ -5013,6 +5059,7 @@ function ModalAcoes({
           <button
             type="button"
             onClick={onEditar}
+            disabled={salvando}
             className="inline-flex h-11 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-semibold text-background transition hover:bg-accent-dark"
           >
             <Pencil className="h-4 w-4" /> Editar
@@ -5020,6 +5067,7 @@ function ModalAcoes({
           <button
             type="button"
             onClick={onExcluir}
+            disabled={salvando}
             className="inline-flex h-11 items-center gap-2 rounded-lg border border-red-900/50 bg-red-900/10 px-4 text-sm font-semibold text-red-400 transition hover:bg-red-900/30"
           >
             <Trash2 className="h-4 w-4" /> Excluir

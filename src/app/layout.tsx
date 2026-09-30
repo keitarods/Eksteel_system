@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Oswald } from "next/font/google";
 import "./globals.css";
+import { siteDescription, siteUrl } from "@/lib/site";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -19,8 +20,18 @@ const oswald = Oswald({
 });
 
 export const metadata: Metadata = {
-  title: "Eksteel System",
-  description: "Sistema de gestão financeira e operacional — Eksteel.",
+  metadataBase: siteUrl(),
+  title: { default: "Eksteel | Gestão financeira e operacional", template: "%s | Eksteel" },
+  description: siteDescription,
+  applicationName: "Eksteel System",
+  robots: { index: false, follow: false },
+  openGraph: {
+    type: "website", locale: "pt_BR", siteName: "Eksteel System",
+    title: "Eksteel | Gestão financeira e operacional", description: siteDescription,
+    ...(siteUrl() ? { images: [{ url: "/images/Eksteel-logo.png", alt: "Eksteel" }] } : {}),
+  },
+  twitter: { card: "summary", title: "Eksteel System", description: siteDescription },
+  icons: { icon: "/icon.png", apple: "/icon.png" },
 };
 
 export default function RootLayout({

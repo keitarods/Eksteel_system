@@ -24,9 +24,9 @@ A migração não foi aplicada automaticamente em produção. A aplicação prec
 
 ## Compras e vendas
 
-Em Compras → Comprar matéria-prima, selecione os materiais, as quantidades nas unidades cadastradas e os preços unitários. Cada linha precisa de uma matéria-prima ativa e toda compra precisa de pelo menos uma linha. Ao salvar como **Recebido** (ou receber um pedido pendente), o banco grava documento, itens e entradas na mesma transação. Linhas avulsas sem vínculo e pedidos sem itens são recusados; despesas sem matéria-prima devem ser lançadas no fluxo de despesas. Pedidos pendentes/cancelados não geram entrada. Depois de integrado, os itens, o valor e a data ficam protegidos. Pedidos anteriores à migração são históricos e também ficam protegidos.
+Em Compras → Comprar matéria-prima, selecione os materiais, as quantidades nas unidades cadastradas e os preços unitários. Cada linha precisa de uma matéria-prima ativa e toda compra precisa de pelo menos uma linha. Ao salvar como **Recebido** (ou receber um pedido pendente), o banco grava documento, itens e entradas na mesma transação. Linhas avulsas sem vínculo e pedidos sem itens são recusados; despesas sem matéria-prima devem ser lançadas no fluxo de despesas. Pedidos pendentes/cancelados não geram entrada. Depois de integrado, os dados ficam protegidos contra alteração direta: a edição usa o RPC descrito abaixo para conciliar somente as diferenças. Pedidos anteriores à migração são históricos e não geram novas entradas ao serem corrigidos.
 
-Cancelar um recebimento novo estorna a quantidade efetivamente recebida; o cancelamento é recusado se faltar saldo para o estorno. Um pedido integrado não pode ser recebido novamente ou excluído. Reenvios idênticos com a mesma chave não repetem a entrada. A divisão da compra no balancete mantém o fluxo existente, posterior ao recebimento.
+Cancelar um recebimento novo estorna a quantidade efetivamente recebida; o cancelamento é recusado se faltar saldo para o estorno. Com a migração de edição, mudanças de status e exclusão usam os RPCs transacionais descritos abaixo; acessos diretos continuam protegidos. Reenvios idênticos com a mesma chave não repetem a entrada. A divisão da compra no balancete mantém o fluxo existente, posterior ao recebimento.
 
 A venda verifica e baixa os materiais limitadores. Se um item de apoio não tiver saldo suficiente, baixa apenas o disponível e grava a quantidade faltante no retrato da venda. A falta não reduz a capacidade, e pode ser consultada nos detalhes do estoque e da venda. O recebimento futuro não baixa automaticamente pendências de apoio antigas; registre a saída ao utilizá-lo.
 
@@ -36,7 +36,7 @@ A aba Histórico de produtos mantém as compras/fabricações antigas somente pa
 
 ## Atividades
 
-A nova aba **Atividades** contém colunas A fazer, Em andamento e Concluído. Cadastre título, descrição, responsável e prazo; edite, exclua ou altere a etapa pelo seletor do cartão. As atividades são compartilhadas entre administradores e sócios e persistidas no Supabase, com usuário e instante de criação/atualização.
+A nova aba **Atividades** contém colunas A fazer, Em andamento e Concluído. Cadastre título, descrição, participantes, checklists e prazo; edite, exclua ou altere a etapa pelo seletor do cartão ou arrastando entre colunas. As atividades são compartilhadas entre administradores e sócios e persistidas no Supabase, com usuário e instante de criação/atualização.
 
 ## Verificação
 
@@ -89,3 +89,37 @@ Aplicação: pause lançamentos, execute o SQL no SQL Editor do Supabase ou conf
 `node scripts/recuperar-custos-historicos.mjs` gera `supabase/local/conciliacao/recuperar-custos-historicos.sql` para bancos já conciliados. Recupera somente médias ausentes com referência nos movimentos das compras históricas recebidas, ponderadas pelas quantidades com preço informado. Registra ajuste de custo estimado sem mudar quantidades, documentos ou vendas anteriores. Sem referência por componente, o custo fica não lançado. O script também atualiza o cálculo das novas vendas para somar os custos conhecidos. A conversão inicial já inclui essa recuperação.
 
 Os cartões dos componentes em Estoque mostram entradas e saídas acumuladas (incluindo ajustes e estornos) e acesso ao histórico filtrado.
+
+## Editar compras já lançadas
+
+Após a migração de estoque, gere `node scripts/gerar-edicao-compras.mjs` e aplique `supabase/local/editar-compras.sql` no SQL Editor do Supabase. Aplique esta migração depois de qualquer reaplicação de `estoque-materias-primas.sql`, pois ambas definem os gatilhos de compras. Publique o frontend após a migração. O arquivo gerado é ignorado pelo Git; o gerador é versionado. Esta alteração não executa SQL em produção automaticamente.
+
+Na lista de compras, use **Ver / editar → Editar → Salvar alterações**. O pedido mantém seu ID e criador. A edição confere a versão do documento, valida os itens e movimenta somente a diferença entre as quantidades anterior e corrigida, em uma única transação. Qualquer falha desfaz a operação inteira. Alterações somente em fornecedor, data ou observação não movimentam o estoque quando os itens e o status são mantidos. A data dos movimentos anteriores permanece como registro do recebimento original.
+
+Compras parcialmente consumidas podem ser editadas: aumentos acrescentam apenas a diferença, reduções retiram apenas a diferença disponível e alterações de preço não movimentam quantidades. Somente uma redução que deixaria saldo negativo é rejeitada. Na correção de preço, a parcela remanescente (limitada ao saldo e à menor quantidade entre antes/depois) é reavaliada pelo preço corrigido; como não há rastreamento por lote, o custo médio resultante é marcado como estimado. O CMV de vendas anteriores permanece preservado. Compras históricas sem movimentos vinculados podem ter o documento corrigido sem relançar saldo. Para transformar esse histórico em entrada física, faça uma conciliação explícita.
+
+Os registros antigos de balancete não possuem vínculo com o pedido. Por isso, alterações de valor/data exigem conferir o rateio na aba Balancete; o sistema não tenta localizar lançamentos pelo nome do fornecedor, o que poderia alterar outro gasto.
+
+Validação: `npm run test:estoque:db` usa PostgreSQL descartável, incluindo edição de recebimento parcialmente consumido, correção de preço, custo médio, cancelamento após edição, exclusão auditada, versão obsoleta, rollback, compras históricas e permissões. Nenhum dado de produção é utilizado.
+
+## Participantes nas atividades
+
+O kanban permite marcar vários usuários cadastrados, buscar por nome/e-mail e remover participantes. Os cartões exibem iniciais e quantidade, e a busca do quadro considera todos os participantes.
+
+Gere `node scripts/gerar-participantes-kanban.mjs` e execute `supabase/local/participantes-kanban.sql` no SQL Editor do Supabase antes de publicar o frontend. A migração adiciona `participantes uuid[]` e valida os usuários no banco, sem alterar os responsáveis antigos. Atividades antigas continuam mostrando o responsável original e são convertidas ao salvar; nomes ambíguos ou usuários indisponíveis precisam ser removidos ou substituídos pela seleção de um usuário cadastrado. Uma lista vazia significa explicitamente sem participantes.
+
+Validação de banco: `node scripts/testar-participantes-kanban.mjs`, usando PostgreSQL descartável.
+
+## Checklists nas atividades
+
+Na criação ou edição de uma atividade, use **Adicionar checklist**, dê um título e adicione os itens. É possível ter várias listas, renomear títulos e itens, marcar/desmarcar etapas, remover itens e excluir listas. O progresso é calculado por lista e o total concluído aparece no cartão. Use **Salvar alterações** para persistir; cancelar descarta as mudanças. Concluir um checklist não muda automaticamente a coluna da atividade.
+
+Gere `node scripts/gerar-checklists-kanban.mjs` e aplique `supabase/local/checklists-kanban.sql` no Supabase antes de publicar o frontend. A migração é reaplicável e adiciona listas vazias às atividades existentes, mantendo participantes e demais dados. O banco valida a estrutura, identificadores únicos, títulos, textos e limites de 20 listas por atividade e 100 itens por lista. A edição rejeita a gravação se outra pessoa tiver alterado os checklists desde a abertura do cartão; reabra para usar a versão atual.
+
+Teste de banco: `node scripts/testar-checklists-kanban.mjs` (PostgreSQL descartável).
+
+### Excluir compras lançadas incorretamente
+
+Regenere e reaplique `editar-compras.sql` para atualizar os RPCs de edição e exclusão. O botão Excluir usa `excluir_compra_materiais`: trava o pedido e materiais, confere a versão, estorna a entrada líquida pelo custo médio atual e remove pedido/itens atomicamente. Um snapshot fica em `compras_auditoria`, com usuário e data; movimentos anteriores são preservados. Se a compra não tem movimentação integrada, a exclusão não altera estoque. Repetir uma exclusão confirmada não movimenta estoque novamente.
+
+Excluir uma compra recebida exige saldo para retirar sua entrada líquida. Se o material já foi consumido e falta saldo, a operação não apaga o documento nem fecha o modal, e informa material, quantidade e saldo disponível. Corrija os consumos lançados incorretamente ou concilie o inventário antes da exclusão. Isso evita eliminar a origem de um saldo já vendido e gerar estoque negativo. O rateio no balancete permanece independente e deve ser conferido.

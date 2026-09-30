@@ -1,3 +1,4 @@
+import { testarEdicaoCompras } from './edicao-compras.test.mjs';
 import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
@@ -11,7 +12,7 @@ const id=n=>`00000000-0000-0000-0000-${String(n).padStart(12,'0')}`;
 const assertSql=(condition,message)=>`do $$begin if not (${condition}) then raise exception '${message}'; end if; end$$;`;
 const rejects=(statement,message)=>`do $$begin begin ${statement}; raise exception '${message}' using errcode='XX000'; exception when raise_exception or check_violation or insufficient_privilege then null; end; end$$;`;
 try {
- docker(['run','--rm','-d','--name',container,'-e','POSTGRES_PASSWORD=local-test-only','postgres:16-alpine']);
+ docker(['run','--rm','-d','--name',container,'-e','POSTGRES_PASSWORD=local-test-only','-e','PGTZ=America/Sao_Paulo','postgres:16-alpine']);
  for(let i=0;i<60;i++){try{docker(['exec',container,'pg_isready','-h','127.0.0.1','-U','postgres']);break;}catch{await new Promise(r=>setTimeout(r,500));}}
  sql(`create role anon; create role authenticated; create schema auth;
  create function auth.uid() returns uuid language sql as $$select '${id(900)}'::uuid$$;
@@ -159,6 +160,7 @@ try {
  const conc = await Promise.allSettled([1,2].map(p=>run('docker',['exec',container,'psql','-U','postgres','-v','ON_ERROR_STOP=1','-c',`set role authenticated; insert into public.vendas(produto_id,quantidade) values('${id(p)}',3);`],{timeout:30000})));
  if(conc.filter(r=>r.status==='fulfilled').length!==1) throw new Error('Concorrência permitiu duas vendas ou rejeitou ambas');
  sql(assertSql(`public.saldo_material('${id(11)}')>=0`,'Concorrência gerou saldo negativo'));
+ testarEdicaoCompras(sql, id, assertSql, rejects);
  console.log('OK: migração reaplicável, saldo inicial, idempotência, ajuste obsoleto, kit compartilhado, apoio faltante, snapshots, custo médio móvel por matéria-prima, CMV de produto/kit, custo de apoio, produto físico, compra/estorno, compra obrigatoriamente por matéria-prima, funções antigas bloqueadas, rollback, RLS, Kanban e vendas concorrentes.');
 } catch (e) { console.error(e.stderr?.toString() ?? e); process.exitCode=1; }
 finally { try { docker(['rm','-f',container]); } catch {} }
