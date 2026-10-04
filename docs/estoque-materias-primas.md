@@ -118,6 +118,10 @@ Gere `node scripts/gerar-checklists-kanban.mjs` e aplique `supabase/local/checkl
 
 Teste de banco: `node scripts/testar-checklists-kanban.mjs` (PostgreSQL descartável).
 
+Se criar ou editar atividades apresentar “Os recursos desta atividade ainda não foram habilitados”, confira a aplicação da migração acima. A ausência da coluna `checklists` bloqueava inclusive gravações sem listas. O formulário agora consulta a disponibilidade da coluna, mesmo em quadros vazios, e permite salvar os demais campos enquanto os checklists estiverem indisponíveis. Após aplicar o SQL, atualize o quadro para habilitar o editor de checklists. Falhas de conexão ou de permissão continuam sendo tratadas como erros de carregamento. A proteção contra alterações concorrentes dos checklists permanece ativa quando a coluna existe.
+
+Teste de compatibilidade da gravação: `node --experimental-strip-types --test scripts/kanban-persistencia.test.mjs`.
+
 ### Excluir compras lançadas incorretamente
 
 Regenere e reaplique `editar-compras.sql` para atualizar os RPCs de edição e exclusão. O botão Excluir usa `excluir_compra_materiais`: trava o pedido e materiais, confere a versão, estorna a entrada líquida pelo custo médio atual e remove pedido/itens atomicamente. Um snapshot fica em `compras_auditoria`, com usuário e data; movimentos anteriores são preservados. Se a compra não tem movimentação integrada, a exclusão não altera estoque. Repetir uma exclusão confirmada não movimenta estoque novamente.

@@ -9,6 +9,7 @@ import {
   ClipboardList,
   DollarSign,
   FileText,
+  FolderOpen,
   Layers,
   PackagePlus,
   Ruler,
@@ -71,7 +72,7 @@ export default async function AppPage() {
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-muted md:text-base">
               Central de controle operacional e financeiro da empresa. Acesse os
-              módulos abaixo para acompanhar resultados, estoque e indicadores.
+              módulos abaixo para acompanhar resultados, estoque, desenhos e indicadores.
             </p>
           </div>
 
@@ -134,98 +135,6 @@ export default async function AppPage() {
                 className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent px-4 text-sm font-semibold text-background transition hover:bg-accent-dark"
               >
                 Acessar dashboard
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            </div>
-          </article>
-
-          {/* Financeiro */}
-          <article className="flex flex-col rounded-xl border border-line bg-panel p-5 shadow-sm sm:p-6">
-            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-accent/20 text-steel">
-              <DollarSign className="h-5 w-5" />
-            </div>
-            <p className="mt-5 text-sm font-semibold text-steel">
-              Financeiro
-            </p>
-            <h2 className="mt-1 text-xl font-bold">Relatórios gerenciais</h2>
-            <p className="mt-2 text-sm leading-6 text-muted">
-              Consulte os itens mais vendidos, a DRE gerencial, despesas e
-              a posição parcial do patrimônio disponível no estoque.
-            </p>
-
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              {(
-                [
-                  ["Despesas", DollarSign],
-                  ["Receita", TrendingUp],
-                  ["Margem", BarChart3],
-                  ["Estoque", Scale],
-                ] as const
-              ).map(([label, Icon]) => (
-                <div
-                  key={label}
-                  className="flex items-center gap-2 rounded-lg border border-panel-hover bg-surface px-3 py-2"
-                >
-                  <Icon className="h-4 w-4 shrink-0 text-steel" />
-                  <p className="text-xs font-semibold text-foreground">
-                    {label}
-                  </p>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-auto pt-5">
-              <Link
-                href="/dashboard?aba=relatorios"
-                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-line bg-surface px-4 text-sm font-semibold text-steel transition hover:bg-panel-hover"
-              >
-                Ver relatórios
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            </div>
-          </article>
-
-          {/* Estoque */}
-          <article className="flex flex-col rounded-xl border border-line bg-panel p-5 shadow-sm sm:p-6 md:col-span-2 xl:col-span-1">
-            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-accent/20 text-steel">
-              <Boxes className="h-5 w-5" />
-            </div>
-            <p className="mt-5 text-sm font-semibold text-steel">
-              Inventário
-            </p>
-            <h2 className="mt-1 text-xl font-bold">Controle de Estoque</h2>
-            <p className="mt-2 text-sm leading-6 text-muted">
-              Monitore o saldo de produtos, alertas de estoque mínimo e
-              movimentações de entrada e saída.
-            </p>
-
-            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-2">
-              {(
-                [
-                  ["Produtos", Boxes],
-                  ["Fabricação", PackagePlus],
-                  ["Alertas", TrendingUp],
-                  ["Compras", ShoppingCart],
-                ] as const
-              ).map(([label, Icon]) => (
-                <div
-                  key={label}
-                  className="flex items-center gap-2 rounded-lg border border-panel-hover bg-surface px-3 py-2"
-                >
-                  <Icon className="h-4 w-4 shrink-0 text-steel" />
-                  <p className="text-xs font-semibold text-foreground">
-                    {label}
-                  </p>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-auto pt-5">
-              <Link
-                href="/dashboard?aba=estoque"
-                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-line bg-surface px-4 text-sm font-semibold text-steel transition hover:bg-panel-hover"
-              >
-                Ver estoque
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </div>
@@ -318,6 +227,107 @@ export default async function AppPage() {
                 className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-line bg-surface px-4 text-sm font-semibold text-steel transition hover:bg-panel-hover"
               >
                 Acessar calculadora
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
+          </article>
+
+          <article className="flex flex-col rounded-xl border border-line bg-panel p-5 shadow-sm sm:p-6">
+            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-sky-400/10 text-sky-300"><FolderOpen className="h-5 w-5" /></div>
+            <p className="mt-5 text-sm font-semibold text-steel">Engenharia</p>
+            <h2 className="mt-1 text-xl font-bold">Desenhos</h2>
+            <p className="mt-2 text-sm leading-6 text-muted">Acesse as pastas do Model System Eksteel e consulte os PDFs dos desenhos publicados pela equipe.</p>
+            <div className="mt-4 flex flex-wrap gap-2">{["Pastas", "Visualização de PDF", "Download"].map(label => <span key={label} className="rounded-lg border border-panel-hover bg-surface px-3 py-2 text-xs font-semibold">{label}</span>)}</div>
+            <div className="mt-auto pt-5"><Link href="/desenhos" className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent px-4 text-sm font-semibold text-background transition hover:bg-accent-dark">Acessar desenhos<ArrowRight className="h-4 w-4" /></Link></div>
+          </article>
+
+          {/* Financeiro */}
+          <article className="flex flex-col rounded-xl border border-line bg-panel p-5 shadow-sm sm:p-6">
+            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-accent/20 text-steel">
+              <DollarSign className="h-5 w-5" />
+            </div>
+            <p className="mt-5 text-sm font-semibold text-steel">
+              Financeiro
+            </p>
+            <h2 className="mt-1 text-xl font-bold">Relatórios gerenciais</h2>
+            <p className="mt-2 text-sm leading-6 text-muted">
+              Consulte os itens mais vendidos, a DRE gerencial, despesas e
+              a posição parcial do patrimônio disponível no estoque.
+            </p>
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              {(
+                [
+                  ["Despesas", DollarSign],
+                  ["Receita", TrendingUp],
+                  ["Margem", BarChart3],
+                  ["Estoque", Scale],
+                ] as const
+              ).map(([label, Icon]) => (
+                <div
+                  key={label}
+                  className="flex items-center gap-2 rounded-lg border border-panel-hover bg-surface px-3 py-2"
+                >
+                  <Icon className="h-4 w-4 shrink-0 text-steel" />
+                  <p className="text-xs font-semibold text-foreground">
+                    {label}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-auto pt-5">
+              <Link
+                href="/dashboard?aba=relatorios"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-line bg-surface px-4 text-sm font-semibold text-steel transition hover:bg-panel-hover"
+              >
+                Ver relatórios
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
+          </article>
+
+          {/* Estoque */}
+          <article className="flex flex-col rounded-xl border border-line bg-panel p-5 shadow-sm sm:p-6 md:col-span-2 xl:col-span-1">
+            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-accent/20 text-steel">
+              <Boxes className="h-5 w-5" />
+            </div>
+            <p className="mt-5 text-sm font-semibold text-steel">
+              Inventário
+            </p>
+            <h2 className="mt-1 text-xl font-bold">Controle de Estoque</h2>
+            <p className="mt-2 text-sm leading-6 text-muted">
+              Monitore o saldo de produtos, alertas de estoque mínimo e
+              movimentações de entrada e saída.
+            </p>
+
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-2">
+              {(
+                [
+                  ["Produtos", Boxes],
+                  ["Fabricação", PackagePlus],
+                  ["Alertas", TrendingUp],
+                  ["Compras", ShoppingCart],
+                ] as const
+              ).map(([label, Icon]) => (
+                <div
+                  key={label}
+                  className="flex items-center gap-2 rounded-lg border border-panel-hover bg-surface px-3 py-2"
+                >
+                  <Icon className="h-4 w-4 shrink-0 text-steel" />
+                  <p className="text-xs font-semibold text-foreground">
+                    {label}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-auto pt-5">
+              <Link
+                href="/dashboard?aba=estoque"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-line bg-surface px-4 text-sm font-semibold text-steel transition hover:bg-panel-hover"
+              >
+                Ver estoque
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </div>

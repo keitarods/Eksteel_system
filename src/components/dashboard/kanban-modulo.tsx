@@ -8,6 +8,7 @@ import { buscarTodasLinhas } from "@/lib/relatorios/dados";
 
 import ChecklistsEditor from "./checklists-editor";
 import { progressoChecklists, validarChecklists, type Checklist } from "@/lib/kanban/checklists";
+import { detectarChecklists, gravarAtividade } from "@/lib/kanban/persistencia";
 
 const colunas = [{ id: "pendente", nome: "A fazer" }, { id: "andamento", nome: "Em andamento" }, { id: "concluida", nome: "Concluído" }] as const;
 type Status = typeof colunas[number]["id"];
@@ -30,6 +31,7 @@ export default function KanbanModulo() {
   const [atividades, setAtividades] = useState<Atividade[]>([]);
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [usuariosDisponiveis, setUsuariosDisponiveis] = useState(false);
+  const [checklistsDisponiveis, setChecklistsDisponiveis] = useState(false);
   const [form, setForm] = useState(vazio);
   const [editando, setEditando] = useState<string | null>(null);
   const [erro, setErro] = useState("");
@@ -40,14 +42,16 @@ export default function KanbanModulo() {
     setUsuariosDisponiveis(false);
     try {
       const db = createClient();
-      const [rows, cadastrados] = await Promise.all([
+      const [rows, cadastrados, temChecklists] = await Promise.all([
         buscarTodasLinhas(db, "atividades_kanban"),
         paginar(async (inicio, fim) => {
           const { data, error } = await db.from("usuarios_empresa").select("usuario_id, nome, email").order("usuario_id").range(inicio, fim);
           if (error) throw new Error("Não foi possível carregar os usuários cadastrados. Atualize o quadro para tentar novamente.");
           return (data ?? []).map(u => ({ id: String(u.usuario_id), nome: String(u.nome ?? "").trim(), email: String(u.email ?? "").trim() }));
         }),
+        detectarChecklists(db),
       ]);
+      setChecklistsDisponiveis(temChecklists);
       setUsuarios(cadastrados.sort((a, b) => (a.nome || a.email).localeCompare(b.nome || b.email, "pt-BR")));
       setUsuariosDisponiveis(true);
       setAtividades((rows as unknown as Atividade[]).sort((a, b) => a.criado_em.localeCompare(b.criado_em)));
@@ -71,7 +75,7 @@ export default function KanbanModulo() {
     try {
       const db = createClient();
       const payload = { ...form, responsavel: form.participantes[0] ?? "", titulo: form.titulo.trim(), prazo: form.prazo || null, checklists: form.checklists.map(c => ({ ...c, titulo: c.titulo.trim(), itens: c.itens.map(i => ({ ...i, texto: i.texto.trim() })) })) };
-      const { data, error } = await (editando ? db.from("atividades_kanban").update(payload).eq("id", editando).eq("checklists", JSON.stringify(checklistsOriginais.current)) : db.from("atividades_kanban").insert({ ...payload, status: statusNovo })).select().single();
+      const { data, error } = await gravarAtividade(db, payload, editando, statusNovo, checklistsDisponiveis, checklistsOriginais.current);
       if (error) {
         if (error.code === "PGRST204" || error.code === "42703") throw new Error("Os recursos desta atividade ainda não foram habilitados no sistema. Solicite a atualização ao administrador.");
         if (error.code === "PGRST116") throw new Error("Esta atividade foi alterada por outra pessoa. Reabra o cartão antes de salvar para preservar as alterações.");
@@ -185,7 +189,7 @@ export default function KanbanModulo() {
       <form onSubmit={salvar}><fieldset disabled={ocupado} className="grid gap-4 sm:grid-cols-2">
         <label className="space-y-1 text-sm sm:col-span-2">Título<input autoFocus required maxLength={200} className={campo} value={form.titulo} onChange={e => setForm({ ...form, titulo: e.target.value })} /></label>
         <label className="space-y-1 text-sm sm:col-span-2">Descrição<textarea rows={4} maxLength={4000} className={campo} value={form.descricao} onChange={e => setForm({ ...form, descricao: e.target.value })} /></label>
-        <ChecklistsEditor value={form.checklists} onChange={checklists => setForm(f => ({ ...f, checklists }))} />
+        {checklistsDisponiveis ? <ChecklistsEditor value={form.checklists} onChange={checklists => setForm(f => ({ ...f, checklists }))} /> : <p className="text-xs text-muted sm:col-span-2">Checklists temporariamente indisponíveis. Você pode salvar os demais dados da atividade.</p>}
         <fieldset disabled={!usuariosDisponiveis || carregando} className="space-y-3 sm:col-span-2">
           <legend className="mb-2 text-sm font-medium">Participantes ({form.participantes.length})</legend>
           <div className="flex flex-wrap gap-2">{form.participantes.map(id => <button key={id} type="button" onClick={() => alternarParticipante(id)} aria-label={`Remover ${nomeResponsavel(id)}`} className="inline-flex max-w-full items-center gap-2 rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1.5 text-xs text-sky-200"><span className="truncate">{nomeResponsavel(id)}{!usuarios.some(u => u.id === id) ? " (indisponível)" : ""}</span><X size={13} className="shrink-0" /></button>)}{!form.participantes.length && <p className="text-xs text-muted">Nenhum participante selecionado.</p>}</div>
