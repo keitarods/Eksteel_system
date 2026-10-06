@@ -32,14 +32,19 @@ function data(l: Linha) {
 }
 export async function carregarBaseGerencial(signal?: AbortSignal): Promise<BaseGerencial> {
   const client = createClient();
-  const [vendas, despesas, produtos, kits, itens] = await Promise.all(
-    ["vendas", "despesas", "produtos", "kits", "kit_itens"].map((t) => buscarTodasLinhas(client, t, "*", signal)),
+  const [vendas, despesas, produtos, kits, itens, devolucoes] = await Promise.all(
+    ["vendas", "despesas", "produtos", "kits", "kit_itens", "devolucoes"].map((t) => buscarTodasLinhas(client, t, "*", signal)),
   );
   return {
+    devolucoes: devolucoes.map(mapDevolucao),
     vendas: vendas.map((r) => ({ cmvTotal: r.cmv_total == null ? null : numero(r, "cmv_total"), cmvEstimado: r.cmv_estimado !== false, cmvComponentes: r.cmv_componentes as BaseGerencial["vendas"][number]["cmvComponentes"], cmvRegistradoEm: texto(r, "cmv_registrado_em"), id: texto(r, "id"), data: data(r), produtoId: texto(r, "produto_id"), produtoNome: texto(r, "produto_nome"), kitId: texto(r, "kit_id"), marketplace: texto(r, "marketplace") || "Outro", quantidade: numero(r, "quantidade"), valorUnitario: numero(r, "valor_unitario"), desconto: numero(r, "desconto", true), taxaMarketplace: numero(r, "taxa_marketplace", true) })),
     despesas: despesas.map((r) => ({ id: texto(r, "id"), data: data(r), categoria: texto(r, "categoria") || "Outros", valor: numero(r, "valor") })),
     produtos: produtos.map((r) => ({ id: texto(r, "id"), nome: texto(r, "nome"), codigo: texto(r, "codigo"), custoMedio: r.custo_medio == null ? null : numero(r, "custo_medio"), custoMedioEstimado: r.custo_medio_estimado !== false, custo: numero(r, "custo", true), estoqueAtual: numero(r, "estoque_atual"), estoqueMinimo: numero(r, "estoque_minimo", true), ativo: r.ativo !== false })),
     fabricacoes: [],
     kits: kits.map((r) => ({ id: texto(r, "id"), nome: texto(r, "nome"), itens: itens.filter((i) => i.kit_id === r.id).map((i) => ({ produtoId: texto(i, "produto_id"), quantidade: numero(i, "quantidade") })) })),
   };
+}
+
+export function mapDevolucao(r: Linha) {
+  return { id: texto(r, "id"), data: data(r), valorTotal: numero(r, "valor_total"), quantidade: numero(r, "quantidade") };
 }

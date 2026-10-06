@@ -1,3 +1,5 @@
+import { testarNotasFiscais } from './notas-fiscais-db.test.mjs';
+import { testarDevolucoes } from './devolucoes-db.test.mjs';
 import { testarEdicaoCompras } from './edicao-compras.test.mjs';
 import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -161,6 +163,8 @@ try {
  if(conc.filter(r=>r.status==='fulfilled').length!==1) throw new Error('Concorrência permitiu duas vendas ou rejeitou ambas');
  sql(assertSql(`public.saldo_material('${id(11)}')>=0`,'Concorrência gerou saldo negativo'));
  testarEdicaoCompras(sql, id, assertSql, rejects);
+ testarDevolucoes(sql, id, assertSql, rejects);
+ testarNotasFiscais(sql, id, assertSql, rejects);
  console.log('OK: migração reaplicável, saldo inicial, idempotência, ajuste obsoleto, kit compartilhado, apoio faltante, snapshots, custo médio móvel por matéria-prima, CMV de produto/kit, custo de apoio, produto físico, compra/estorno, compra obrigatoriamente por matéria-prima, funções antigas bloqueadas, rollback, RLS, Kanban e vendas concorrentes.');
 } catch (e) { console.error(e.stderr?.toString() ?? e); process.exitCode=1; }
 finally { try { docker(['rm','-f',container]); } catch {} }

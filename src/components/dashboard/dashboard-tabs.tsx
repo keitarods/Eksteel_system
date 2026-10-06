@@ -43,8 +43,11 @@ import EstoqueMateriais from "@/components/dashboard/estoque-materiais";
 import KanbanModulo from "@/components/dashboard/kanban-modulo";
 import ProdutoSiteEditor from "@/components/dashboard/produto-site-editor";
 import RoscaProdutos from "@/components/dashboard/rosca-produtos";
+import NotasFiscais from "@/components/dashboard/notas-fiscais";
+import DevolucoesModulo from "@/components/dashboard/devolucoes-modulo";
+import type { DevolucaoRelatorio } from "@/lib/relatorios/metricas";
 import RelatoriosModulo from "@/components/dashboard/relatorios-modulo";
-import { buscarTodasLinhas, buscarKitsComItens } from "@/lib/relatorios/dados";
+import { buscarTodasLinhas, buscarKitsComItens, mapDevolucao } from "@/lib/relatorios/dados";
 import { prepararVendas, resumoPeriodo, posicaoEstoque, agruparValores, fimMes, rankingItens } from "@/lib/relatorios/metricas";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -52,6 +55,7 @@ import { prepararVendas, resumoPeriodo, posicaoEstoque, agruparValores, fimMes, 
 type AbaDashboard =
   | "visao-geral"
   | "vendas"
+  | "devolucoes"
   | "cadastro"
   | "estoque"
   | "atividades"
@@ -352,6 +356,7 @@ const CORES_DESPESA = [
 const TODAS_ABAS = [
   { id: "visao-geral", label: "Visão Geral", icon: LayoutDashboard },
   { id: "vendas", label: "Vendas", icon: ShoppingCart },
+  { id: "devolucoes", label: "Devoluções", icon: RefreshCw },
   { id: "cadastro", label: "Cadastro", icon: ClipboardList },
   { id: "estoque", label: "Estoque", icon: Archive },
   { id: "atividades", label: "Atividades", icon: ClipboardList },
@@ -462,8 +467,8 @@ export default function DashboardTabs({
     : TODAS_ABAS.filter((a) => a.id !== "usuarios");
 
   return (
-    <div className="mt-5 sm:mt-8">
-      <div className="flex gap-1.5 overflow-x-auto rounded-xl border border-line bg-background/95 p-2 shadow-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div className="mt-5 min-w-0 sm:mt-8">
+      <div className="grid min-w-0 grid-cols-2 gap-1.5 rounded-xl border border-line bg-background/95 p-2 shadow-sm sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
         {abas.map((aba) => {
           const Icon = aba.icon;
           const ativa = abaAtiva === aba.id;
@@ -475,14 +480,14 @@ export default function DashboardTabs({
               aria-label={aba.label}
               aria-pressed={ativa}
               onClick={() => setAbaAtiva(aba.id)}
-              className={`flex h-10 shrink-0 items-center gap-2 rounded-lg px-3 sm:px-4 text-sm font-semibold transition ${
+              className={`flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-lg px-2 py-2.5 text-sm font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
                 ativa
                   ? "bg-accent text-background shadow-sm"
                   : "text-steel hover:bg-panel-hover"
               }`}
             >
               <Icon className="h-4 w-4 shrink-0" />
-              <span className="hidden sm:inline">{aba.label}</span>
+              <span className="min-w-0 break-words text-left leading-5">{aba.label}</span>
             </button>
           );
         })}
@@ -495,6 +500,7 @@ export default function DashboardTabs({
         {abaAtiva === "vendas" && (
           <VendasModulo usuarioId={usuarioId} dataHoje={dataHoje} />
         )}
+        {abaAtiva === "devolucoes" && <DevolucoesModulo dataHoje={dataHoje} />}
         {abaAtiva === "cadastro" && (
           <CadastroModulo usuarioId={usuarioId} isAdmin={isAdmin} dataHoje={dataHoje} />
         )}
@@ -520,6 +526,7 @@ export default function DashboardTabs({
 // ─── Visão Geral ─────────────────────────────────────────────────────────────
 
 function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: string }) {
+  const [devolucoes, setDevolucoes] = useState<DevolucaoRelatorio[]>([]);
   const [vendas, setVendas] = useState<Venda[]>([]);
   const [despesas, setDespesas] = useState<Despesa[]>([]);
   const [produtos, setProdutos] = useState<Produto[]>([]);
@@ -545,7 +552,7 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
     async function carregar() {
       const supabase = createClient();
       try {
-        const [v, d, p, bl, kt, mp, cp] = await Promise.all([
+        const [v, d, p, bl, kt, mp, cp, dv] = await Promise.all([
           buscarTodasLinhas(supabase, "vendas"),
           buscarTodasLinhas(supabase, "despesas"),
           buscarTodasLinhas(supabase, "produtos"),
@@ -553,8 +560,10 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
           buscarKitsComItens(supabase),
           buscarTodasLinhas(supabase, "saldos_materias_primas"),
           buscarTodasLinhas(supabase, "componentes_produto"),
+          buscarTodasLinhas(supabase, "devolucoes"),
         ]);
         if (ativo) {
+          setDevolucoes(dv.map(mapDevolucao));
           setVendas(v.map(mapVenda).filter((i) => i.data <= dataHoje));
           setDespesas(d.map(mapDespesa).filter((i) => i.data <= dataHoje));
           setProdutos(p.map(mapProduto));
@@ -655,7 +664,7 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
   // ─── Financial calculations ───
   const baseGerencial = { vendas, despesas, produtos, fabricacoes: [], kits };
   const vendasApuradas = prepararVendas(baseGerencial);
-  const resumo = resumoPeriodo(vendasApuradas, despesas, { inicio: "0001-01-01", fim: dataHoje });
+  const resumo = resumoPeriodo(vendasApuradas, despesas, { inicio: "0001-01-01", fim: dataHoje }, devolucoes);
   const receitaBruta = resumo.bruta;
   const descontosConcedidos = resumo.descontos;
   const taxasMarketplace = resumo.taxas;
@@ -676,7 +685,7 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
   // ─── Chart data ───
   const ultimos6Meses = obterUltimosMeses(6, dataHoje);
   const evolucaoMensal = ultimos6Meses.map((mes) => {
-    const r = resumoPeriodo(vendasApuradas, despesas, { inicio: `${mes.prefixo}-01`, fim: mes.prefixo === dataHoje.slice(0, 7) ? dataHoje : fimMes(mes.prefixo) });
+    const r = resumoPeriodo(vendasApuradas, despesas, { inicio: `${mes.prefixo}-01`, fim: mes.prefixo === dataHoje.slice(0, 7) ? dataHoje : fimMes(mes.prefixo) }, devolucoes);
     return { name: mes.label, Receita: r.receita, Despesas: r.cpv === null ? null : r.cpv + r.taxas + r.despesasTotal };
   });
   const vendasPorMarketplace = agruparValores(vendasApuradas, (v) => v.marketplace || "Outro", (v) => v.aposDescontos).map((i) => ({ name: i.nome, value: i.total })).filter((i) => i.value > 0);
@@ -1533,6 +1542,7 @@ function VendasModulo({
               <LinhaDetalhe label="Taxa marketplace" valor={`- ${formatarMoeda(vendaSelecionada.taxaMarketplace)}`} alerta={vendaSelecionada.taxaMarketplace > 0} />
               <LinhaDetalhe label="Valor após descontos e taxas" valor={formatarMoeda(totalLiquidoVenda(vendaSelecionada))} destaque />
               {vendaSelecionada.observacao && <LinhaDetalhe label="Observação" valor={vendaSelecionada.observacao} />}
+              <NotasFiscais key={vendaSelecionada.id} tipo="vendas" registroId={vendaSelecionada.id} />
               <HistoricoRegistro
                 usuariosMap={usuariosMap}
                 criadoPor={vendaSelecionada.criadoPor}
@@ -3574,6 +3584,7 @@ function ComprasModulo({
                 </div>
               )}
 
+              <NotasFiscais key={pedidoSelecionado.id} tipo="compras" registroId={pedidoSelecionado.id} />
               <HistoricoRegistro
                 usuariosMap={usuariosMap}
                 criadoPor={pedidoSelecionado.criadoPor}

@@ -13,6 +13,7 @@ function hojeIso() {
 const ABAS_VALIDAS = [
   "visao-geral",
   "vendas",
+  "devolucoes",
   "cadastro",
   "estoque",
   "atividades",

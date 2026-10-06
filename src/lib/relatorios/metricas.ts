@@ -5,7 +5,8 @@ export type ProdutoRelatorio = { custoMedio?: number | null; custoMedioEstimado?
 export type FabricacaoRelatorio = { id: string; produtoId: string; data: string; qtdFabricada: number; valorTotal: number };
 export type DespesaRelatorio = { id: string; data: string; categoria: string; valor: number };
 export type KitRelatorio = { id: string; nome: string; itens: { produtoId: string; quantidade: number }[] };
-export type BaseGerencial = { vendas: VendaRelatorio[]; produtos: ProdutoRelatorio[]; fabricacoes: FabricacaoRelatorio[]; despesas: DespesaRelatorio[]; kits: KitRelatorio[] };
+export type DevolucaoRelatorio = { id: string; data: string; valorTotal: number; quantidade: number };
+export type BaseGerencial = { devolucoes?: DevolucaoRelatorio[]; vendas: VendaRelatorio[]; produtos: ProdutoRelatorio[]; fabricacoes: FabricacaoRelatorio[]; despesas: DespesaRelatorio[]; kits: KitRelatorio[] };
 export type Periodo = { inicio: string; fim: string };
 export const moeda = (valor: number) => Math.round((valor + Number.EPSILON) * 100) / 100;
 export const dentro = (data: string, periodo: Periodo) => data >= periodo.inicio && data <= periodo.fim;
@@ -55,13 +56,16 @@ export function prepararVendas(base: BaseGerencial) {
   });
 }
 export type VendaApurada = ReturnType<typeof prepararVendas>[number];
-export function resumoPeriodo(vendas: VendaApurada[], despesas: DespesaRelatorio[], periodo: Periodo) {
+export function resumoPeriodo(vendas: VendaApurada[], despesas: DespesaRelatorio[], periodo: Periodo, devolucoes: DevolucaoRelatorio[] = []) {
+  const devolvidas = devolucoes.filter(d => dentro(d.data, periodo));
+  const valorDevolucoes = moeda(devolvidas.reduce((s, d) => s + d.valorTotal, 0));
+  const quantidadeDevolvida = devolvidas.reduce((s, d) => s + d.quantidade, 0);
   const selecionadas = vendas.filter((v) => dentro(v.data, periodo));
   const gastos = despesas.filter((d) => dentro(d.data, periodo));
   const bruta = moeda(selecionadas.reduce((s, v) => s + v.bruta, 0));
   const descontos = moeda(selecionadas.reduce((s, v) => s + v.desconto, 0));
   const taxas = moeda(selecionadas.reduce((s, v) => s + v.taxaMarketplace, 0));
-  const receita = moeda(bruta - descontos);
+  const receita = moeda(bruta - descontos - valorDevolucoes);
   const semCusto = selecionadas.filter((v) => v.cpv === null).length;
   const cpvConhecido = moeda(selecionadas.reduce((s, v) => s + (v.cpv ?? 0), 0));
   const cpv = semCusto ? null : cpvConhecido;
@@ -69,7 +73,7 @@ export function resumoPeriodo(vendas: VendaApurada[], despesas: DespesaRelatorio
   const brutoEstimado = cpv === null ? null : moeda(receita - cpv);
   const resultado = brutoEstimado === null ? null : moeda(brutoEstimado - taxas - despesasTotal);
   return {
-    bruta, descontos, receita, receitaLiquidaGerencial: moeda(receita - taxas), taxas, cpv, cpvConhecido, despesasTotal, brutoEstimado, resultado, semCusto, custosEstimados: selecionadas.filter(v => v.estimado).length,
+    valorDevolucoes, quantidadeDevolvida, devolucoes: devolvidas.length, bruta, descontos, receita, receitaLiquidaGerencial: moeda(receita - taxas), taxas, cpv, cpvConhecido, despesasTotal, brutoEstimado, resultado, semCusto, custosEstimados: selecionadas.filter(v => v.estimado).length,
     quantidade: selecionadas.reduce((s, v) => s + v.quantidade, 0),
     lancamentos: selecionadas.length,
     valorMedio: selecionadas.length ? moeda(receita / selecionadas.length) : null,
