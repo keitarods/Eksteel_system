@@ -5,7 +5,7 @@ export type ProdutoRelatorio = { custoMedio?: number | null; custoMedioEstimado?
 export type FabricacaoRelatorio = { id: string; produtoId: string; data: string; qtdFabricada: number; valorTotal: number };
 export type DespesaRelatorio = { id: string; data: string; categoria: string; valor: number };
 export type KitRelatorio = { id: string; nome: string; itens: { produtoId: string; quantidade: number }[] };
-export type DevolucaoRelatorio = { id: string; data: string; valorTotal: number; quantidade: number };
+export type DevolucaoRelatorio = { custoExtra?: number; id: string; data: string; valorTotal: number; quantidade: number };
 export type BaseGerencial = { devolucoes?: DevolucaoRelatorio[]; vendas: VendaRelatorio[]; produtos: ProdutoRelatorio[]; fabricacoes: FabricacaoRelatorio[]; despesas: DespesaRelatorio[]; kits: KitRelatorio[] };
 export type Periodo = { inicio: string; fim: string };
 export const moeda = (valor: number) => Math.round((valor + Number.EPSILON) * 100) / 100;
@@ -59,22 +59,23 @@ export type VendaApurada = ReturnType<typeof prepararVendas>[number];
 export function resumoPeriodo(vendas: VendaApurada[], despesas: DespesaRelatorio[], periodo: Periodo, devolucoes: DevolucaoRelatorio[] = []) {
   const devolvidas = devolucoes.filter(d => dentro(d.data, periodo));
   const valorDevolucoes = moeda(devolvidas.reduce((s, d) => s + d.valorTotal, 0));
+  const custoExtraDevolucoes = moeda(devolvidas.reduce((s, d) => s + (d.custoExtra ?? 0), 0));
   const quantidadeDevolvida = devolvidas.reduce((s, d) => s + d.quantidade, 0);
   const selecionadas = vendas.filter((v) => dentro(v.data, periodo));
   const gastos = despesas.filter((d) => dentro(d.data, periodo));
-  const bruta = moeda(selecionadas.reduce((s, v) => s + v.bruta, 0));
+  const bruta = moeda(selecionadas.reduce((s, v) => s + v.bruta, 0) - valorDevolucoes);
   const descontos = moeda(selecionadas.reduce((s, v) => s + v.desconto, 0));
   const taxas = moeda(selecionadas.reduce((s, v) => s + v.taxaMarketplace, 0));
-  const receita = moeda(bruta - descontos - valorDevolucoes);
+  const receita = moeda(bruta - descontos);
   const semCusto = selecionadas.filter((v) => v.cpv === null).length;
   const cpvConhecido = moeda(selecionadas.reduce((s, v) => s + (v.cpv ?? 0), 0));
   const cpv = semCusto ? null : cpvConhecido;
-  const despesasTotal = moeda(gastos.reduce((s, d) => s + d.valor, 0));
+  const despesasTotal = moeda(gastos.reduce((s, d) => s + d.valor, 0) + custoExtraDevolucoes);
   const brutoEstimado = cpv === null ? null : moeda(receita - cpv);
   const resultado = brutoEstimado === null ? null : moeda(brutoEstimado - taxas - despesasTotal);
   return {
-    valorDevolucoes, quantidadeDevolvida, devolucoes: devolvidas.length, bruta, descontos, receita, receitaLiquidaGerencial: moeda(receita - taxas), taxas, cpv, cpvConhecido, despesasTotal, brutoEstimado, resultado, semCusto, custosEstimados: selecionadas.filter(v => v.estimado).length,
-    quantidade: selecionadas.reduce((s, v) => s + v.quantidade, 0),
+    custoExtraDevolucoes, valorDevolucoes, quantidadeDevolvida, devolucoes: devolvidas.length, bruta, descontos, receita, receitaLiquidaGerencial: moeda(receita - taxas), taxas, cpv, cpvConhecido, despesasTotal, brutoEstimado, resultado, semCusto, custosEstimados: selecionadas.filter(v => v.estimado).length,
+    quantidade: selecionadas.reduce((s, v) => s + v.quantidade, 0) - quantidadeDevolvida,
     lancamentos: selecionadas.length,
     valorMedio: selecionadas.length ? moeda(receita / selecionadas.length) : null,
     margem: resultado !== null && receita > 0 ? resultado / receita * 100 : null,
@@ -95,6 +96,14 @@ export function rankingItens(vendas: VendaApurada[], base: BaseGerencial, period
     item.cpv = item.cpv === null || v.cpv === null ? null : item.cpv + v.cpv;
     itens.set(id, item);
   }
+  // Devoluções podem reunir pedidos de produtos e canais diferentes.
+  // Sem rateio por venda gravado, mantenha a dedução explícita, sem inventar atribuição.
+  const devolvidas = (base.devolucoes ?? []).filter(d => dentro(d.data, periodo));
+  if (devolvidas.length) itens.set("devolucoes", {
+    id: "devolucoes", nome: "Devoluções (dedução consolidada)", tipo: "Devolução",
+    quantidade: -devolvidas.reduce((s, d) => s + d.quantidade, 0),
+    receita: -devolvidas.reduce((s, d) => s + d.valorTotal, 0), taxas: 0, cpv: 0,
+  });
   const porReceita = [...itens.values()].sort((a, b) => b.receita - a.receita || a.id.localeCompare(b.id));
   const totalPositivo = porReceita.reduce((s, i) => s + Math.max(0, i.receita), 0);
   let acumulado = 0;

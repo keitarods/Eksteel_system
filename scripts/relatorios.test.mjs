@@ -70,7 +70,7 @@ test('devoluções reduzem receita na data da devolução, inclusive sem vendas 
  const b=base(); const vendas=prepararVendas(b);
  const ds=[{id:'r1',data:'2026-09-12',valorTotal:12.5,quantidade:1},{id:'r2',data:'2026-10-01',valorTotal:80,quantidade:3}];
  const r=resumoPeriodo(vendas,b.despesas,periodo,ds);
- assert.equal(r.bruta,60); assert.equal(r.receita,42.5); assert.equal(r.receitaLiquidaGerencial,39.5);
+ assert.equal(r.bruta,47.5); assert.equal(r.receita,42.5); assert.equal(r.receitaLiquidaGerencial,39.5);
  assert.equal(r.resultado,15.5); assert.equal(r.valorDevolucoes,12.5); assert.equal(r.quantidadeDevolvida,1);
  const outubro=resumoPeriodo(vendas,b.despesas,{inicio:'2026-10-01',fim:'2026-10-31'},ds);
  assert.equal(outubro.receita,-80); assert.equal(outubro.quantidadeDevolvida,3); assert.equal(outubro.devolucoes,1);

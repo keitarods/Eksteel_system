@@ -46,5 +46,5 @@ export async function carregarBaseGerencial(signal?: AbortSignal): Promise<BaseG
 }
 
 export function mapDevolucao(r: Linha) {
-  return { id: texto(r, "id"), data: data(r), valorTotal: numero(r, "valor_total"), quantidade: numero(r, "quantidade") };
+  return { id: texto(r, "id"), data: data(r), custoExtra: numero(r, "custo_extra", true), valorTotal: numero(r, "valor_total"), quantidade: numero(r, "quantidade") };
 }

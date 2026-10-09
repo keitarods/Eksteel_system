@@ -25,11 +25,11 @@ Validação da biblioteca: `node --experimental-strip-types scripts/desenhos-bib
 
 Gere a migração com `node scripts/gerar-devolucoes.mjs` e execute `supabase/local/devolucoes.sql` no SQL Editor do Supabase, após as migrações de CMV e estoque de matérias-primas. A migração é reaplicável. A aplicação exige essa tabela para carregar os indicadores completos.
 
-Na aba **Devoluções**, informe data, código de cada produto, quantidade inteira, valor unitário efetivamente devolvido e, opcionalmente, número do pedido e observação. **Em boas condições** vem marcado; desmarque para itens avariados. Separe condições diferentes em linhas distintas. O pedido é uma referência textual, sem vínculo automático ou limite baseado em uma venda cadastrada.
+Na aba **Devoluções**, informe data, código de cada produto, quantidade inteira, valor unitário efetivamente devolvido e, opcionalmente, número do pedido e observação. **Em boas condições** vem marcado; desmarque para itens avariados. Separe condições diferentes em linhas distintas. Em **Pedidos lançados vinculados**, busque pela data, produto, canal ou identificador e marque uma ou mais vendas. A busca preserva os pedidos já marcados. Todos os vínculos são salvos e aparecem no histórico; vendas vinculadas não podem ser excluídas. A referência textual permanece opcional para números externos. Selecionar um pedido preenche seus produtos e quantidades, preservando ajustes de outros pedidos. Desmarcá-lo remove seus itens. Vendas simples sugerem o valor unitário após desconto; kits usam a composição histórica e exigem informar o valor devolvido por produto. Quantidades, valores e condições continuam editáveis para devoluções parciais, sem limite automático baseado na venda. Reaplique `supabase/local/devolucoes.sql` para disponibilizar os múltiplos vínculos. A migração preserva os vínculos únicos já existentes.
 
 O lançamento e a reposição são atômicos e protegidos contra repetição da mesma tentativa. Produtos simples retornam ao saldo físico; produtos compostos retornam às quantidades equivalentes de matérias-primas da composição atual, conforme o modelo de estoque existente. O histórico preserva os códigos, nomes e condições informados. Lançamentos são imutáveis nesta versão.
 
-Dashboard e DRE deduzem o valor no período da devolução, preservando vendas brutas, CMV e taxas originais. Rankings de produtos e canais continuam mostrando vendas antes de devoluções. A aba Devoluções inclui unidades, valor, número de lançamentos e sazonalidade dos últimos 12 meses.
+Dashboard e DRE deduzem o valor no período da devolução, reduzindo também a receita bruta exibida e preservando CMV e taxas originais. Rankings e canais dos relatórios incluem as devoluções em uma dedução consolidada, sem inventar rateio por pedido. A aba Devoluções inclui unidades, valor, número de lançamentos e sazonalidade dos últimos 12 meses.
 
 Validação: `npm run test:relatorios`, `npx tsc --noEmit` e `npm run test:estoque:db` (PostgreSQL temporário via Docker, incluindo devoluções, rollback, idempotência e permissões).
 
@@ -42,3 +42,7 @@ Após salvar uma venda ou pedido de compra, abra seus detalhes e use **Notas fis
 A nota fica vinculada ao lançamento completo (inclusive todos os itens do pedido). Excluir um lançamento não apaga seus arquivos automaticamente, mas bloqueia o acesso pela aplicação; limpeza administrativa de arquivos órfãos deve ser feita no Storage. A configuração de formatos e tamanho é verificada também pelo serviço Storage, sem validação fiscal do conteúdo.
 
 Testes: `node --experimental-strip-types --test scripts/notas-fiscais.test.mjs` e `npm run test:estoque:db` (inclui políticas de acesso às notas em PostgreSQL isolado).
+
+O campo opcional **Custo extra da devolução** registra frete, taxa ou gasto adicional (vazio = zero). O valor devolvido reduz a receita; o custo extra integra as despesas e reduz o resultado uma única vez, na data da devolução. Não relance esse mesmo custo em Despesas. Reaplique `supabase/local/devolucoes.sql` para habilitar o campo.
+
+A receita bruta exibida é o total das vendas menos o valor devolvido. Receita líquida, resultado e margens partem dessa base, sem descontar a devolução novamente. A quantidade líquida também desconta unidades devolvidas; a quantidade de lançamentos permanece uma contagem de registros.

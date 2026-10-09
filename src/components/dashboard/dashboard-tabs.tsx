@@ -662,7 +662,7 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
   if (erroLeitura) return <p role="alert" className="rounded-xl border border-red-900/50 bg-red-900/10 p-5 text-red-300">{erroLeitura} Recarregue a página para tentar novamente. Nenhum indicador parcial foi exibido.</p>;
 
   // ─── Financial calculations ───
-  const baseGerencial = { vendas, despesas, produtos, fabricacoes: [], kits };
+  const baseGerencial = { vendas, despesas, produtos, fabricacoes: [], kits, devolucoes };
   const vendasApuradas = prepararVendas(baseGerencial);
   const resumo = resumoPeriodo(vendasApuradas, despesas, { inicio: "0001-01-01", fim: dataHoje }, devolucoes);
   const receitaBruta = resumo.bruta;
@@ -734,7 +734,7 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
           <KpiCard titulo="Margem líquida gerencial" valor={margemLiquida === null ? "Sem base" : `${margemLiquida.toFixed(1)}%`} destaque={margemLiquida !== null && margemLiquida >= 0} alerta={margemLiquida !== null && margemLiquida < 0} />
         </div>
         <p className="mt-4 text-xs leading-5 text-muted">
-          Receita líquida gerencial = bruta − descontos − taxas de marketplace. Vendas após descontos = bruta − descontos. Resultado bruto estimado = vendas após descontos − CMV estimado. Lucro líquido gerencial estimado = resultado bruto − taxas de marketplace − despesas registradas. Margens calculadas sobre vendas após descontos. CMV usa o custo gravado na venda; no histórico sem registro, usa o custo cadastral como estimativa. O resultado não é lucro líquido contábil. {resumo.custosEstimados > 0 ? `${resumo.custosEstimados} vendas usam custo estimado (cadastro/saldo inicial). ` : ""} {resumo.semCusto > 0 ? `${resumo.semCusto} vendas sem custo cadastral ou histórico completo: resultado não apurado.` : ""} {resumo.despesasTaxas > 0 ? "Confira possível duplicidade de taxas nas vendas e despesas." : ""}
+          Receita bruta exibida = vendas − devoluções. Receita líquida gerencial = receita bruta exibida − descontos − taxas de marketplace. Custos extras de devolução integram as despesas e reduzem o lucro líquido. Vendas após descontos = bruta − descontos. Resultado bruto estimado = vendas após descontos − CMV estimado. Lucro líquido gerencial estimado = resultado bruto − taxas de marketplace − despesas registradas. Margens calculadas sobre vendas após descontos. CMV usa o custo gravado na venda; no histórico sem registro, usa o custo cadastral como estimativa. O resultado não é lucro líquido contábil. {resumo.custosEstimados > 0 ? `${resumo.custosEstimados} vendas usam custo estimado (cadastro/saldo inicial). ` : ""} {resumo.semCusto > 0 ? `${resumo.semCusto} vendas sem custo cadastral ou histórico completo: resultado não apurado.` : ""} {resumo.despesasTaxas > 0 ? "Confira possível duplicidade de taxas nas vendas e despesas." : ""}
         </p>
       </div>
 
@@ -802,9 +802,9 @@ function VisaoGeral({ usuarioId, dataHoje }: { usuarioId: string; dataHoje: stri
         </div>
         <div className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
           <p className="text-sm font-semibold text-steel">Produtos</p>
-          <h3 className="mt-1 text-lg font-bold">Vendas após descontos por produto</h3>
+          <h3 className="mt-1 text-lg font-bold">Vendas por produto · deduções no resumo</h3>
           {receitaPorProduto.length > 0 ? (
-            <RoscaProdutos itens={receitaPorProduto} titulo="Vendas após descontos por produto" />
+            <><RoscaProdutos itens={receitaPorProduto} titulo="Vendas por produto · deduções no resumo" /><p className="mt-3 text-xs text-muted">Devoluções a deduzir da distribuição: {formatarMoeda(resumo.valorDevolucoes)}. Receita consolidada após descontos e devoluções: {formatarMoeda(resumo.receita)}.</p></>
           ) : (
             <div className="mt-4 py-12 text-center text-sm text-muted">Nenhuma venda registrada ainda.</div>
           )}
@@ -1027,6 +1027,8 @@ function VendasModulo({
   const [vendas, setVendas] = useState<Venda[]>([]);
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [kits, setKits] = useState<Kit[]>([]);
+  const [devolucoes, setDevolucoes] = useState<DevolucaoRelatorio[]>([]);
+  const [erroIndicadores, setErroIndicadores] = useState("");
   const [usuariosMap, setUsuariosMap] = useState<Record<string, string>>({});
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
@@ -1065,12 +1067,9 @@ function VendasModulo({
     let ativo = true;
     async function carregar() {
       const supabase = createClient();
-      const [{ data: v }, { data: p }, { data: kt }, { data: u }] = await Promise.all([
-        supabase
-          .from("vendas")
-          .select("*")
-
-          .order("data", { ascending: false }),
+      try {
+      const [v, { data: p, error: ep }, { data: kt, error: ek }, { data: u, error: eu }, dv] = await Promise.all([
+        buscarTodasLinhas(supabase, "vendas"),
         supabase
           .from("produtos")
           .select("*")
@@ -1079,15 +1078,21 @@ function VendasModulo({
           .order("nome"),
         supabase.from("kits").select("id, nome, descricao, kit_itens(id, produto_id, quantidade, produtos(nome, codigo))").order("nome"),
         supabase.from("usuarios_empresa").select("usuario_id, nome, email"),
+        buscarTodasLinhas(supabase, "devolucoes"),
       ]);
+      if (ep || ek || eu) throw ep || ek || eu;
       if (ativo) {
-        setVendas((v ?? []).map(mapVenda));
+        setVendas(v.map(mapVenda).sort((a, b) => b.data.localeCompare(a.data)));
+        setDevolucoes(dv.map(mapDevolucao));
         setProdutos((p ?? []).map(mapProduto));
         setKits((kt ?? []).map(mapKit));
         setUsuariosMap(
           Object.fromEntries((u ?? []).map((m) => [String(m.usuario_id), String(m.nome || m.email || "")]))
         );
         setCarregando(false);
+      }
+      } catch {
+        if (ativo) { setErroIndicadores("Não foi possível carregar todos os dados financeiros. Recarregue a página."); setCarregando(false); }
       }
     }
     carregar();
@@ -1280,9 +1285,11 @@ function VendasModulo({
     );
   });
 
-  const totalBruto = vendas.reduce((s, v) => s + totalBrutoVenda(v), 0);
-  const totalLiquido = vendas.reduce((s, v) => s + totalLiquidoVenda(v), 0);
-  const totalItens = vendas.reduce((s, v) => s + v.quantidade, 0);
+  const totalDevolvido = devolucoes.reduce((s, d) => s + d.valorTotal, 0);
+  const totalBruto = vendas.reduce((s, v) => s + totalBrutoVenda(v), 0) - totalDevolvido;
+  const custosDevolucao = devolucoes.reduce((s, d) => s + (d.custoExtra ?? 0), 0);
+  const totalLiquido = vendas.reduce((s, v) => s + totalLiquidoVenda(v), 0) - totalDevolvido;
+  const totalItens = vendas.reduce((s, v) => s + v.quantidade, 0) - devolucoes.reduce((s, d) => s + d.quantidade, 0);
 
   return (
     <section className="rounded-xl border border-line bg-panel p-4 sm:p-6 shadow-sm">
@@ -1292,12 +1299,21 @@ function VendasModulo({
         descricao="Cadastre vendas por marketplace e acompanhe o faturamento consolidado."
       />
 
+      {erroIndicadores ? <p role="alert" className="mt-5 text-red-400">{erroIndicadores}</p> : carregando ? <EstadoCarregando texto="Carregando indicadores..." /> : <>
       <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <KpiCard titulo="Vendas registradas" valor={String(vendas.length)} />
-        <KpiCard titulo="Itens vendidos" valor={String(totalItens)} />
+        <KpiCard titulo="Itens após devoluções" valor={String(totalItens)} />
         <KpiCard titulo="Receita bruta" valor={formatarMoeda(totalBruto)} />
         <KpiCard titulo="Receita líquida gerencial" valor={formatarMoeda(totalLiquido)} destaque />
       </div>
+
+      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+        <KpiCard titulo="Devoluções descontadas" valor={formatarMoeda(totalDevolvido)} />
+        <KpiCard titulo="Custos extras de devolução" valor={formatarMoeda(custosDevolucao)} />
+        <KpiCard titulo="Após devoluções e custos extras" valor={formatarMoeda(totalLiquido - custosDevolucao)} />
+      </div>
+      <p className="mt-3 text-xs text-muted">Receita bruta e itens vendidos já descontam devoluções. Receita líquida = receita bruta exibida − descontos − taxas. O último cartão desconta também os custos extras de devolução, antes do CMV e das demais despesas. Os valores de cada venda abaixo preservam o lançamento original.</p>
+      </>}
 
       <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <form
